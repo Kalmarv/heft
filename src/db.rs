@@ -95,13 +95,23 @@ impl DuxDb {
     }
 
     /// Batch-write multiple directories in a single transaction.
-    pub fn put_batch<'a>(
+    /// Merges with any existing entries for the same key to avoid data loss
+    /// when a directory's entries are split across multiple flush batches.
+    pub fn put_batch_merge<'a>(
         &self,
         dirs: impl Iterator<Item = (&'a str, &'a [u8])>,
     ) -> Result<()> {
         let mut wtxn = self.env.write_txn()?;
-        for (path, encoded) in dirs {
-            self.db.put(&mut wtxn, path, encoded)?;
+        for (path, new_encoded) in dirs {
+            if let Some(existing) = self.db.get(&wtxn, path)? {
+                // Merge: decode existing + new, re-encode together.
+                let mut entries = decode_many(existing)?;
+                entries.extend(decode_many(new_encoded)?);
+                let merged = encode_many(&entries);
+                self.db.put(&mut wtxn, path, &merged)?;
+            } else {
+                self.db.put(&mut wtxn, path, new_encoded)?;
+            }
         }
         wtxn.commit()?;
         Ok(())

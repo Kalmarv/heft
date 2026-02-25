@@ -207,8 +207,9 @@ fn flush_batch(db: &DuxDb, dir_entries: &mut HashMap<String, Vec<EntryRecord>>) 
         .drain()
         .map(|(path, entries)| (path, encode_many(&entries)))
         .collect();
-    // Pass references to avoid cloning encoded bytes.
-    db.put_batch(batch.iter().map(|(p, e)| (p.as_str(), e.as_slice())))?;
+    // Use merge variant so entries for the same directory across multiple
+    // flushes are appended rather than overwritten.
+    db.put_batch_merge(batch.iter().map(|(p, e)| (p.as_str(), e.as_slice())))?;
     Ok(())
 }
 

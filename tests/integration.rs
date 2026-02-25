@@ -1,0 +1,301 @@
+use std::fs;
+use std::path::PathBuf;
+
+/// Create a unique temp directory for each test's LMDB database.
+fn temp_db_path(name: &str) -> PathBuf {
+    let path = std::env::temp_dir().join(format!("dux-test-{}-{}", name, std::process::id()));
+    let _ = fs::remove_dir_all(&path);
+    path
+}
+
+/// Clean up a temp DB directory.
+fn cleanup(path: &PathBuf) {
+    let _ = fs::remove_dir_all(path);
+}
+
+mod db_tests {
+    use super::*;
+
+    #[test]
+    fn open_and_root_sentinel() {
+        let db_path = temp_db_path("root-sentinel");
+        let db = dux::db::DuxDb::open(&db_path).unwrap();
+
+        // No root initially.
+        assert!(db.get_root().unwrap().is_none());
+
+        // Store and retrieve root.
+        db.put_root("/home/user/data").unwrap();
+        assert_eq!(db.get_root().unwrap().unwrap(), "/home/user/data");
+
+        // Overwriting root works.
+        db.put_root("/mnt/storage").unwrap();
+        assert_eq!(db.get_root().unwrap().unwrap(), "/mnt/storage");
+
+        cleanup(&db_path);
+    }
+
+    #[test]
+    fn put_batch_merge_and_read() {
+        let db_path = temp_db_path("batch-merge");
+        let db = dux::db::DuxDb::open(&db_path).unwrap();
+
+        let entries_a = dux::entry::encode_many(&[dux::entry::EntryRecord {
+            entry_type: dux::entry::EntryType::File,
+            mtime: 100,
+            size_apparent: 1000,
+            size_actual: 4096,
+            name: "file_a.txt".into(),
+        }]);
+
+        let entries_b = dux::entry::encode_many(&[dux::entry::EntryRecord {
+            entry_type: dux::entry::EntryType::File,
+            mtime: 200,
+            size_apparent: 2000,
+            size_actual: 4096,
+            name: "file_b.txt".into(),
+        }]);
+
+        // First batch: write file_a under /some/dir.
+        db.put_batch_merge(
+            [("/some/dir", entries_a.as_slice())].into_iter(),
+        )
+        .unwrap();
+
+        // Second batch: write file_b under the SAME key.
+        db.put_batch_merge(
+            [("/some/dir", entries_b.as_slice())].into_iter(),
+        )
+        .unwrap();
+
+        // Both entries should be present (merged, not overwritten).
+        let rtxn = db.read_txn().unwrap();
+        let entries = db.get_dir_in_txn(&rtxn, "/some/dir").unwrap().unwrap();
+        assert_eq!(entries.len(), 2, "expected 2 entries after merge, got {}", entries.len());
+        assert_eq!(entries[0].name, "file_a.txt");
+        assert_eq!(entries[1].name, "file_b.txt");
+
+        cleanup(&db_path);
+    }
+
+    #[test]
+    fn clear_wipes_everything() {
+        let db_path = temp_db_path("clear");
+        let db = dux::db::DuxDb::open(&db_path).unwrap();
+
+        db.put_root("/test").unwrap();
+        let entries = dux::entry::encode_many(&[dux::entry::EntryRecord {
+            entry_type: dux::entry::EntryType::File,
+            mtime: 1,
+            size_apparent: 1,
+            size_actual: 1,
+            name: "x".into(),
+        }]);
+        db.put_batch_merge([("/test", entries.as_slice())].into_iter()).unwrap();
+
+        assert!(db.entry_count().unwrap() > 0);
+        db.clear().unwrap();
+        assert_eq!(db.entry_count().unwrap(), 0);
+        assert!(db.get_root().unwrap().is_none());
+
+        cleanup(&db_path);
+    }
+
+    #[test]
+    fn entry_count_and_disk_size() {
+        let db_path = temp_db_path("stats");
+        let db = dux::db::DuxDb::open(&db_path).unwrap();
+
+        assert_eq!(db.entry_count().unwrap(), 0);
+
+        db.put_root("/test").unwrap();
+        // Sentinel is 1 key.
+        assert_eq!(db.entry_count().unwrap(), 1);
+
+        let entries = dux::entry::encode_many(&[dux::entry::EntryRecord {
+            entry_type: dux::entry::EntryType::Dir,
+            mtime: 0,
+            size_apparent: 0,
+            size_actual: 4096,
+            name: "sub".into(),
+        }]);
+        db.put_batch_merge([("/test", entries.as_slice())].into_iter()).unwrap();
+        assert_eq!(db.entry_count().unwrap(), 2); // sentinel + /test
+
+        assert!(db.disk_size().unwrap() > 0);
+
+        cleanup(&db_path);
+    }
+}
+
+mod tree_tests {
+    use super::*;
+
+    /// Helper: populate a DB with a known directory structure and return the DB.
+    ///
+    /// Structure:
+    ///   /root
+    ///     ├── docs/
+    ///     │   ├── readme.txt   (apparent=100, actual=4096, mtime=500)
+    ///     │   └── notes.txt    (apparent=50,  actual=4096, mtime=600)
+    ///     ├── src/
+    ///     │   └── main.rs      (apparent=200, actual=4096, mtime=400)
+    ///     └── photo.jpg        (apparent=3000, actual=4096, mtime=300)
+    fn setup_test_tree(name: &str) -> (PathBuf, dux::db::DuxDb) {
+        let db_path = temp_db_path(name);
+        let db = dux::db::DuxDb::open(&db_path).unwrap();
+
+        db.put_root("/root").unwrap();
+
+        // /root contains: docs/, src/, photo.jpg
+        let root_entries = dux::entry::encode_many(&[
+            dux::entry::EntryRecord {
+                entry_type: dux::entry::EntryType::Dir,
+                mtime: 0,
+                size_apparent: 0,
+                size_actual: 0,
+                name: "docs".into(),
+            },
+            dux::entry::EntryRecord {
+                entry_type: dux::entry::EntryType::Dir,
+                mtime: 0,
+                size_apparent: 0,
+                size_actual: 0,
+                name: "src".into(),
+            },
+            dux::entry::EntryRecord {
+                entry_type: dux::entry::EntryType::File,
+                mtime: 300,
+                size_apparent: 3000,
+                size_actual: 4096,
+                name: "photo.jpg".into(),
+            },
+        ]);
+        db.put_batch_merge([("/root", root_entries.as_slice())].into_iter())
+            .unwrap();
+
+        // /root/docs contains: readme.txt, notes.txt
+        let docs_entries = dux::entry::encode_many(&[
+            dux::entry::EntryRecord {
+                entry_type: dux::entry::EntryType::File,
+                mtime: 500,
+                size_apparent: 100,
+                size_actual: 4096,
+                name: "readme.txt".into(),
+            },
+            dux::entry::EntryRecord {
+                entry_type: dux::entry::EntryType::File,
+                mtime: 600,
+                size_apparent: 50,
+                size_actual: 4096,
+                name: "notes.txt".into(),
+            },
+        ]);
+        db.put_batch_merge([("/root/docs", docs_entries.as_slice())].into_iter())
+            .unwrap();
+
+        // /root/src contains: main.rs
+        let src_entries = dux::entry::encode_many(&[dux::entry::EntryRecord {
+            entry_type: dux::entry::EntryType::File,
+            mtime: 400,
+            size_apparent: 200,
+            size_actual: 4096,
+            name: "main.rs".into(),
+        }]);
+        db.put_batch_merge([("/root/src", src_entries.as_slice())].into_iter())
+            .unwrap();
+
+        (db_path, db)
+    }
+
+    #[test]
+    fn tree_aggregate_sizes() {
+        let (db_path, db) = setup_test_tree("tree-agg");
+
+        let tree = dux::tree::build_tree(&db, "/root").unwrap();
+
+        // Total apparent: 100 + 50 + 200 + 3000 = 3350
+        assert_eq!(tree.size_apparent, 3350);
+        // Total actual: 4096 * 4 = 16384
+        assert_eq!(tree.size_actual, 16384);
+        // Max mtime across all descendants: 600
+        assert_eq!(tree.mtime, 600);
+        // Count: 4 files + 2 subdirs + 1 root = 7
+        assert_eq!(tree.count, 7);
+
+        cleanup(&db_path);
+    }
+
+    #[test]
+    fn tree_children_sorted_by_size_desc() {
+        let (db_path, db) = setup_test_tree("tree-sort");
+
+        let tree = dux::tree::build_tree(&db, "/root").unwrap();
+        let children = tree.children.as_ref().unwrap();
+
+        // Children should be sorted by size_actual descending.
+        for pair in children.windows(2) {
+            assert!(
+                pair[0].size_actual >= pair[1].size_actual,
+                "children not sorted: {} ({}) before {} ({})",
+                pair[0].name, pair[0].size_actual,
+                pair[1].name, pair[1].size_actual
+            );
+        }
+
+        cleanup(&db_path);
+    }
+
+    #[test]
+    fn tree_subdirectory_aggregation() {
+        let (db_path, db) = setup_test_tree("tree-subdir");
+
+        // Build tree for just the docs subdirectory.
+        let docs_tree = dux::tree::build_tree(&db, "/root/docs").unwrap();
+
+        assert_eq!(docs_tree.name, "docs");
+        assert_eq!(docs_tree.size_apparent, 150); // 100 + 50
+        assert_eq!(docs_tree.size_actual, 8192); // 4096 + 4096
+        assert_eq!(docs_tree.mtime, 600); // max(500, 600)
+        assert_eq!(docs_tree.count, 3); // 2 files + 1 dir
+
+        cleanup(&db_path);
+    }
+
+    #[test]
+    fn aggregate_sizes_matches_tree() {
+        let (db_path, db) = setup_test_tree("tree-agg-match");
+
+        // build_tree opens its own read txn internally, so call it first
+        // and capture results before opening another txn for aggregate_sizes.
+        // (LMDB allows only one read txn per thread.)
+        let tree = dux::tree::build_tree(&db, "/root").unwrap();
+
+        let rtxn = db.read_txn().unwrap();
+        let agg = dux::tree::aggregate_sizes(&db, &rtxn, "/root").unwrap();
+
+        assert_eq!(agg.size_apparent, tree.size_apparent);
+        assert_eq!(agg.size_actual, tree.size_actual);
+        assert_eq!(agg.mtime, tree.mtime);
+        assert_eq!(agg.count, tree.count);
+
+        cleanup(&db_path);
+    }
+
+    #[test]
+    fn empty_directory_produces_leaf_node() {
+        let db_path = temp_db_path("tree-empty");
+        let db = dux::db::DuxDb::open(&db_path).unwrap();
+
+        db.put_root("/empty").unwrap();
+        // No entries written for /empty — it's an empty directory.
+
+        let tree = dux::tree::build_tree(&db, "/empty").unwrap();
+        assert_eq!(tree.size_apparent, 0);
+        assert_eq!(tree.size_actual, 0);
+        assert_eq!(tree.count, 1); // just the dir itself
+        assert!(tree.children.is_none());
+
+        cleanup(&db_path);
+    }
+}

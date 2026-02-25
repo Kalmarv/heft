@@ -112,6 +112,22 @@ pub fn decode_many(data: &[u8]) -> Result<Vec<EntryRecord>> {
 mod tests {
     use super::*;
 
+    /// Assert every field of an EntryRecord matches expected values.
+    fn assert_entry(
+        got: &EntryRecord,
+        entry_type: EntryType,
+        mtime: u64,
+        size_apparent: u64,
+        size_actual: u64,
+        name: &str,
+    ) {
+        assert_eq!(got.entry_type, entry_type, "entry_type mismatch for '{name}'");
+        assert_eq!(got.mtime, mtime, "mtime mismatch for '{name}'");
+        assert_eq!(got.size_apparent, size_apparent, "size_apparent mismatch for '{name}'");
+        assert_eq!(got.size_actual, size_actual, "size_actual mismatch for '{name}'");
+        assert_eq!(got.name, name, "name mismatch");
+    }
+
     #[test]
     fn round_trip_empty() {
         let encoded = encode_many(&[]);
@@ -131,11 +147,7 @@ mod tests {
         let encoded = encode_many(&entries);
         let decoded = decode_many(&encoded).unwrap();
         assert_eq!(decoded.len(), 1);
-        assert_eq!(decoded[0].entry_type, EntryType::File);
-        assert_eq!(decoded[0].mtime, 1700000000);
-        assert_eq!(decoded[0].size_apparent, 4096);
-        assert_eq!(decoded[0].size_actual, 8192);
-        assert_eq!(decoded[0].name, "hello.txt");
+        assert_entry(&decoded[0], EntryType::File, 1700000000, 4096, 8192, "hello.txt");
     }
 
     #[test]
@@ -166,11 +178,9 @@ mod tests {
         let encoded = encode_many(&entries);
         let decoded = decode_many(&encoded).unwrap();
         assert_eq!(decoded.len(), 3);
-        assert_eq!(decoded[0].entry_type, EntryType::Dir);
-        assert_eq!(decoded[0].name, "subdir");
-        assert_eq!(decoded[1].size_apparent, u64::MAX);
-        assert_eq!(decoded[2].entry_type, EntryType::Symlink);
-        assert_eq!(decoded[2].name, "link → target");
+        assert_entry(&decoded[0], EntryType::Dir, 0, 0, 4096, "subdir");
+        assert_entry(&decoded[1], EntryType::File, u64::MAX, u64::MAX, u64::MAX, "big_values.bin");
+        assert_entry(&decoded[2], EntryType::Symlink, 100, 50, 0, "link → target");
     }
 
     #[test]
@@ -184,6 +194,21 @@ mod tests {
         }];
         let encoded = encode_many(&entries);
         let decoded = decode_many(&encoded).unwrap();
-        assert_eq!(decoded[0].name, "日本語ファイル.txt");
+        assert_entry(&decoded[0], EntryType::File, 42, 100, 512, "日本語ファイル.txt");
+    }
+
+    #[test]
+    fn truncated_data_returns_error() {
+        let entries = vec![EntryRecord {
+            entry_type: EntryType::File,
+            mtime: 100,
+            size_apparent: 200,
+            size_actual: 300,
+            name: "test.txt".into(),
+        }];
+        let encoded = encode_many(&entries);
+        // Truncate in the middle — should fail, not panic.
+        let truncated = &encoded[..encoded.len() / 2];
+        assert!(decode_many(truncated).is_err());
     }
 }
