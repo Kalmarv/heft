@@ -1,10 +1,8 @@
-#![allow(dead_code)]
-
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use heed::types::{Bytes, Str};
-use heed::{Database, Env, EnvOpenOptions};
+use heed::{Database, Env, EnvFlags, EnvOpenOptions};
 
 use crate::entry::{decode_many, encode_many, EntryRecord, EntryType};
 use crate::error::Result;
@@ -15,7 +13,6 @@ const ROOT_KEY: &str = "\x00__dux_root__";
 pub struct DuxDb {
     env: Env,
     db: Database<Str, Bytes>,
-    path: PathBuf,
 }
 
 impl DuxDb {
@@ -25,36 +22,27 @@ impl DuxDb {
         fs::create_dir_all(path)?;
 
         let env = unsafe {
-            EnvOpenOptions::new()
-                .map_size(1024 * 1024 * 1024) // 1 GiB
-                .max_dbs(1)
-                .open(path)?
+            let mut opts = EnvOpenOptions::new();
+            opts.map_size(1024 * 1024 * 1024); // 1 GiB
+            opts.max_dbs(1);
+            // WRITE_MAP: use a writable mmap, faster than default write-through.
+            // MAP_ASYNC: don't flush pages to disk synchronously on commit.
+            // Safe for dux since the DB is always re-generable via `dux index`.
+            opts.flags(EnvFlags::WRITE_MAP | EnvFlags::MAP_ASYNC);
+            opts.open(path)?
         };
 
         let mut wtxn = env.write_txn()?;
         let db: Database<Str, Bytes> = env.create_database(&mut wtxn, Some("dirs"))?;
         wtxn.commit()?;
 
-        Ok(DuxDb {
-            env,
-            db,
-            path: path.to_path_buf(),
-        })
+        Ok(DuxDb { env, db })
     }
 
     /// Default database path: ~/.dux.db
     pub fn default_path() -> PathBuf {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
         PathBuf::from(home).join(".dux.db")
-    }
-
-    /// Store encoded entries for a directory path.
-    pub fn put_dir(&self, dir_path: &str, entries: &[EntryRecord]) -> Result<()> {
-        let encoded = encode_many(entries);
-        let mut wtxn = self.env.write_txn()?;
-        self.db.put(&mut wtxn, dir_path, &encoded)?;
-        wtxn.commit()?;
-        Ok(())
     }
 
     /// Store the root sentinel — records which path was indexed.
@@ -89,23 +77,31 @@ impl DuxDb {
         }
     }
 
-    /// Read entries for a directory.
-    pub fn get_dir(&self, dir_path: &str) -> Result<Option<Vec<EntryRecord>>> {
-        let rtxn = self.env.read_txn()?;
-        match self.db.get(&rtxn, dir_path)? {
+    /// Read entries within an existing read transaction (avoids per-call txn overhead).
+    pub fn get_dir_in_txn(
+        &self,
+        rtxn: &heed::RoTxn<'_>,
+        dir_path: &str,
+    ) -> Result<Option<Vec<EntryRecord>>> {
+        match self.db.get(rtxn, dir_path)? {
             Some(data) => Ok(Some(decode_many(data)?)),
             None => Ok(None),
         }
     }
 
+    /// Begin a read transaction.
+    pub fn read_txn(&self) -> Result<heed::RoTxn<'_>> {
+        Ok(self.env.read_txn()?)
+    }
+
     /// Batch-write multiple directories in a single transaction.
     pub fn put_batch<'a>(
         &self,
-        dirs: impl Iterator<Item = (&'a str, Vec<u8>)>,
+        dirs: impl Iterator<Item = (&'a str, &'a [u8])>,
     ) -> Result<()> {
         let mut wtxn = self.env.write_txn()?;
         for (path, encoded) in dirs {
-            self.db.put(&mut wtxn, path, &encoded)?;
+            self.db.put(&mut wtxn, path, encoded)?;
         }
         wtxn.commit()?;
         Ok(())
@@ -125,34 +121,10 @@ impl DuxDb {
         Ok(self.db.len(&rtxn)?)
     }
 
-    /// Size of the database file on disk.
+    /// Actual data size in the database (non-free pages only).
+    /// With WRITE_MAP the file is pre-allocated to map_size, so file size is misleading.
     pub fn disk_size(&self) -> Result<u64> {
-        // LMDB stores data in a single `data.mdb` file inside the directory.
-        let mdb_path = self.path.join("data.mdb");
-        match fs::metadata(&mdb_path) {
-            Ok(m) => Ok(m.len()),
-            Err(_) => Ok(0),
-        }
+        Ok(self.env.non_free_pages_size()?)
     }
 
-    /// Iterate all key-value pairs in the database.
-    pub fn iter_all(&self) -> Result<Vec<(String, Vec<EntryRecord>)>> {
-        let rtxn = self.env.read_txn()?;
-        let mut result = Vec::new();
-        let iter = self.db.iter(&rtxn)?;
-        for item in iter {
-            let (key, val) = item?;
-            if key == ROOT_KEY {
-                continue;
-            }
-            let entries = decode_many(val)?;
-            result.push((key.to_string(), entries));
-        }
-        Ok(result)
-    }
-
-    /// Get a reference to the environment (for advanced use).
-    pub fn env(&self) -> &Env {
-        &self.env
-    }
 }

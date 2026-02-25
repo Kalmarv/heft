@@ -71,7 +71,13 @@ pub fn run_index(root: &Path, db: &DuxDb, opts: &ScanOptions) -> Result<()> {
             });
         for result in walker {
             match result {
-                Ok(entry) => process_path(&root, &entry.path(), opts, db, &mut state)?,
+                Ok(entry) => {
+                    let path = entry.path();
+                    // Use file_type from jwalk (already available from readdir) to
+                    // avoid a full stat call for type detection.
+                    let ft = entry.file_type;
+                    process_entry(&root, &path, ft, opts, db, &mut state)?;
+                }
                 Err(e) => eprintln!("dux: warning: {e}"),
             }
         }
@@ -82,7 +88,11 @@ pub fn run_index(root: &Path, db: &DuxDb, opts: &ScanOptions) -> Result<()> {
             .parallelism(parallelism);
         for result in walker {
             match result {
-                Ok(entry) => process_path(&root, &entry.path(), opts, db, &mut state)?,
+                Ok(entry) => {
+                    let path = entry.path();
+                    let ft = entry.file_type;
+                    process_entry(&root, &path, ft, opts, db, &mut state)?;
+                }
                 Err(e) => eprintln!("dux: warning: {e}"),
             }
         }
@@ -108,9 +118,10 @@ pub fn run_index(root: &Path, db: &DuxDb, opts: &ScanOptions) -> Result<()> {
     Ok(())
 }
 
-fn process_path(
+fn process_entry(
     root: &Path,
     path: &Path,
+    file_type: std::fs::FileType,
     opts: &ScanOptions,
     db: &DuxDb,
     state: &mut ScanState,
@@ -120,6 +131,24 @@ fn process_path(
         return Ok(());
     }
 
+    let entry_type = if file_type.is_file() {
+        EntryType::File
+    } else if file_type.is_dir() {
+        EntryType::Dir
+    } else if file_type.is_symlink() {
+        EntryType::Symlink
+    } else {
+        EntryType::Other
+    };
+
+    // The root directory itself: just track as a dir, don't add to a parent.
+    if path == root {
+        state.dir_count += 1;
+        return Ok(());
+    }
+
+    // Single stat call for size/mtime — we already got the file_type from readdir
+    // for free via jwalk, so this is the only stat syscall per entry.
     let metadata = match path.symlink_metadata() {
         Ok(m) => m,
         Err(e) => {
@@ -128,25 +157,9 @@ fn process_path(
         }
     };
 
-    let entry_type = if metadata.is_file() {
-        EntryType::File
-    } else if metadata.is_dir() {
-        EntryType::Dir
-    } else if metadata.file_type().is_symlink() {
-        EntryType::Symlink
-    } else {
-        EntryType::Other
-    };
-
     let mtime = metadata.mtime().max(0) as u64;
     let size_apparent = metadata.len();
     let size_actual = metadata.blocks() * 512;
-
-    // The root directory itself: just track as a dir, don't add to a parent.
-    if path == root {
-        state.dir_count += 1;
-        return Ok(());
-    }
 
     let name = path
         .file_name()
@@ -157,14 +170,6 @@ fn process_path(
         .parent()
         .map(|p: &Path| p.to_string_lossy().to_string())
         .unwrap_or_default();
-
-    let record = EntryRecord {
-        entry_type,
-        mtime,
-        size_apparent,
-        size_actual,
-        name,
-    };
 
     if entry_type == EntryType::Dir {
         state.dir_count += 1;
@@ -177,7 +182,17 @@ fn process_path(
         eprintln!("{} ({})", path.display(), format_size(size_apparent));
     }
 
-    state.dir_entries.entry(parent).or_default().push(record);
+    state
+        .dir_entries
+        .entry(parent)
+        .or_default()
+        .push(EntryRecord {
+            entry_type,
+            mtime,
+            size_apparent,
+            size_actual,
+            name,
+        });
 
     // Flush accumulated entries periodically.
     if state.dir_entries.len() >= BATCH_FLUSH_THRESHOLD {
@@ -192,7 +207,8 @@ fn flush_batch(db: &DuxDb, dir_entries: &mut HashMap<String, Vec<EntryRecord>>) 
         .drain()
         .map(|(path, entries)| (path, encode_many(&entries)))
         .collect();
-    db.put_batch(batch.iter().map(|(p, e)| (p.as_str(), e.clone())))?;
+    // Pass references to avoid cloning encoded bytes.
+    db.put_batch(batch.iter().map(|(p, e)| (p.as_str(), e.as_slice())))?;
     Ok(())
 }
 

@@ -90,7 +90,12 @@ pub fn decode_many(data: &[u8]) -> Result<Vec<EntryRecord>> {
         if pos + name_len > data.len() {
             return Err(DuxError::Encoding("truncated name".into()));
         }
-        let name = String::from_utf8_lossy(&data[pos..pos + name_len]).into_owned();
+        // Fast path: most filenames are valid UTF-8, avoid the lossy Cow allocation.
+        let name_bytes = &data[pos..pos + name_len];
+        let name = match std::str::from_utf8(name_bytes) {
+            Ok(s) => s.to_owned(),
+            Err(_) => String::from_utf8_lossy(name_bytes).into_owned(),
+        };
         pos += name_len;
         entries.push(EntryRecord {
             entry_type,

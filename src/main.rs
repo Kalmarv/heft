@@ -122,7 +122,10 @@ fn resolve_path(db: &DuxDb, path: Option<PathBuf>) -> error::Result<String> {
 
 /// Display a directory listing with human-readable sizes.
 fn run_ls(db: &DuxDb, dir_path: &str) -> error::Result<()> {
-    let entries = db.get_dir(dir_path)?.ok_or_else(|| {
+    // Single read transaction for the entire ls operation.
+    let rtxn = db.read_txn()?;
+
+    let entries = db.get_dir_in_txn(&rtxn, dir_path)?.ok_or_else(|| {
         error::DuxError::Other(format!("directory not found in database: {dir_path}"))
     })?;
 
@@ -131,7 +134,6 @@ fn run_ls(db: &DuxDb, dir_path: &str) -> error::Result<()> {
         return Ok(());
     }
 
-    // Build display rows with numeric sizes for sorting.
     struct Row {
         name: String,
         apparent: u64,
@@ -139,7 +141,7 @@ fn run_ls(db: &DuxDb, dir_path: &str) -> error::Result<()> {
         mtime: u64,
     }
 
-    let mut rows: Vec<Row> = Vec::new();
+    let mut rows: Vec<Row> = Vec::with_capacity(entries.len());
     for e in &entries {
         let suffix = match e.entry_type {
             entry::EntryType::Dir => "/",
@@ -147,10 +149,11 @@ fn run_ls(db: &DuxDb, dir_path: &str) -> error::Result<()> {
             _ => "",
         };
 
+        // Use lightweight aggregate for dirs — no TreeNode allocation.
         let (apparent, actual) = if e.entry_type == entry::EntryType::Dir {
             let child_path = format!("{}/{}", dir_path, e.name);
-            match tree::build_tree(db, &child_path) {
-                Ok(node) => (node.size_apparent, node.size_actual),
+            match tree::aggregate_sizes(db, &rtxn, &child_path) {
+                Ok(agg) => (agg.size_apparent, agg.size_actual),
                 Err(_) => (e.size_apparent, e.size_actual),
             }
         } else {
@@ -166,7 +169,7 @@ fn run_ls(db: &DuxDb, dir_path: &str) -> error::Result<()> {
     }
 
     // Sort by actual size descending.
-    rows.sort_by(|a, b| b.actual.cmp(&a.actual));
+    rows.sort_unstable_by(|a, b| b.actual.cmp(&a.actual));
 
     // Format and compute column widths.
     let formatted: Vec<(String, String, String, String)> = rows
