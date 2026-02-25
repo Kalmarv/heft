@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
@@ -21,7 +21,7 @@ pub struct ScanOptions {
 }
 
 struct ScanState {
-    dir_entries: HashMap<String, Vec<EntryRecord>>,
+    dir_entries: FxHashMap<String, Vec<EntryRecord>>,
     file_count: u64,
     dir_count: u64,
     total_size: u64,
@@ -46,7 +46,7 @@ pub fn run_index(root: &Path, db: &DuxDb, opts: &ScanOptions) -> Result<()> {
     };
 
     let mut state = ScanState {
-        dir_entries: HashMap::new(),
+        dir_entries: FxHashMap::default(),
         file_count: 0,
         dir_count: 0,
         total_size: 0,
@@ -202,7 +202,7 @@ fn process_entry(
     Ok(())
 }
 
-fn flush_batch(db: &DuxDb, dir_entries: &mut HashMap<String, Vec<EntryRecord>>) -> Result<()> {
+fn flush_batch(db: &DuxDb, dir_entries: &mut FxHashMap<String, Vec<EntryRecord>>) -> Result<()> {
     let batch: Vec<(String, Vec<u8>)> = dir_entries
         .drain()
         .map(|(path, entries)| (path, encode_many(&entries)))

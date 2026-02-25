@@ -104,10 +104,11 @@ impl DuxDb {
         let mut wtxn = self.env.write_txn()?;
         for (path, new_encoded) in dirs {
             if let Some(existing) = self.db.get(&wtxn, path)? {
-                // Merge: decode existing + new, re-encode together.
-                let mut entries = decode_many(existing)?;
-                entries.extend(decode_many(new_encoded)?);
-                let merged = encode_many(&entries);
+                // O(1) merge: our binary format is a headerless sequence of entries,
+                // so concatenating raw bytes is identical to decode+extend+encode.
+                let mut merged = Vec::with_capacity(existing.len() + new_encoded.len());
+                merged.extend_from_slice(existing);
+                merged.extend_from_slice(new_encoded);
                 self.db.put(&mut wtxn, path, &merged)?;
             } else {
                 self.db.put(&mut wtxn, path, new_encoded)?;
