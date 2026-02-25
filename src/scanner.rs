@@ -25,6 +25,11 @@ struct ScanState {
     file_count: u64,
     dir_count: u64,
     total_size: u64,
+    // Cache: jwalk yields entries roughly grouped by parent directory,
+    // so we avoid re-allocating and re-validating the same parent string
+    // for every file in a directory.
+    last_parent_path: std::path::PathBuf,
+    last_parent_str: String,
 }
 
 /// Run the index operation: walk a directory tree and store results in the database.
@@ -50,6 +55,8 @@ pub fn run_index(root: &Path, db: &DuxDb, opts: &ScanOptions) -> Result<()> {
         file_count: 0,
         dir_count: 0,
         total_size: 0,
+        last_parent_path: std::path::PathBuf::new(),
+        last_parent_str: String::new(),
     };
 
     // Build walker — two branches because process_read_dir changes the generic type.
@@ -163,13 +170,16 @@ fn process_entry(
 
     let name = path
         .file_name()
-        .map(|n: &std::ffi::OsStr| n.to_string_lossy().to_string())
-        .unwrap_or_default();
+        .and_then(|n| n.to_str())
+        .unwrap_or_default()
+        .to_owned();
 
-    let parent = path
-        .parent()
-        .map(|p: &Path| p.to_string_lossy().to_string())
-        .unwrap_or_default();
+    // Cache parent string — only re-derive when the parent directory changes.
+    let parent_path = path.parent().unwrap_or_else(|| Path::new(""));
+    if parent_path != state.last_parent_path {
+        state.last_parent_path = parent_path.to_path_buf();
+        state.last_parent_str = parent_path.to_string_lossy().into_owned();
+    }
 
     if entry_type == EntryType::Dir {
         state.dir_count += 1;
@@ -184,7 +194,7 @@ fn process_entry(
 
     state
         .dir_entries
-        .entry(parent)
+        .entry(state.last_parent_str.clone())
         .or_default()
         .push(EntryRecord {
             entry_type,
