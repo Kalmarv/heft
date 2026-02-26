@@ -1,5 +1,6 @@
-use std::fs;
-use std::path::PathBuf;
+use std::fs::{self, File};
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::process;
 
 use clap::Parser;
@@ -9,6 +10,7 @@ use heft::db::HeftDb;
 use heft::entry;
 use heft::error;
 use heft::export;
+use heft::pack;
 use heft::scanner::{self, format_count, format_size, ScanOptions};
 use heft::tree;
 
@@ -60,7 +62,25 @@ fn run(cli: Cli) -> error::Result<()> {
             scanner::run_index(&path, &db, &opts)?;
         }
 
-        Command::Info => {
+        Command::Info { path } => {
+            if let Some(ref p) = path {
+                if is_heft_file(p) {
+                    let meta = pack::read_info(p)?;
+                    println!("File:    {}", p.display());
+                    println!("Root:    {}", meta.root);
+                    println!("Version: {}", meta.heft_version);
+                    println!(
+                        "Data:    {} files  {} dirs  {}",
+                        format_count(meta.file_count),
+                        format_count(meta.dir_count),
+                        format_size(meta.size_actual),
+                    );
+                    let file_size = std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
+                    println!("Packed:  {}", format_size(file_size));
+                    return Ok(());
+                }
+            }
+
             let db = HeftDb::open(&db_path, map_size_gib)?;
             let root = db.get_root()?;
             let disk = db.disk_size()?;
@@ -100,6 +120,25 @@ fn run(cli: Cli) -> error::Result<()> {
                 compress.as_deref(),
                 output.as_deref(),
             )?;
+        }
+
+        Command::Pack { path, output } => {
+            let db = HeftDb::open(&db_path, map_size_gib)?;
+            let root_path = resolve_path(&db, path)?;
+
+            let output_path = output.unwrap_or_else(|| {
+                let basename = std::path::Path::new(&root_path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "root".to_string());
+                PathBuf::from(format!("{basename}.heft"))
+            });
+
+            pack::run_pack(&db, &root_path, &output_path)?;
+        }
+
+        Command::Unpack { input } => {
+            pack::run_unpack(&input, &db_path, map_size_gib)?;
         }
     }
 
@@ -230,4 +269,13 @@ fn days_to_ymd(mut days: i64) -> (i64, i64, i64) {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
     (y, m, d)
+}
+
+/// Detect a .heft file by reading its magic bytes.
+fn is_heft_file(path: &Path) -> bool {
+    let Ok(mut f) = File::open(path) else {
+        return false;
+    };
+    let mut buf = [0u8; 5];
+    f.read_exact(&mut buf).is_ok() && &buf == b"HEFT\x01"
 }

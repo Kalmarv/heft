@@ -44,8 +44,11 @@ pub enum Command {
         exclude_from: Option<PathBuf>,
     },
 
-    /// Show database statistics
-    Info,
+    /// Show database statistics (or inspect a .heft file)
+    Info {
+        /// Path to a .heft file (default: show database stats)
+        path: Option<PathBuf>,
+    },
 
     /// List contents of a directory from the database
     Ls {
@@ -65,5 +68,21 @@ pub enum Command {
         /// Output file (default: stdout)
         #[arg(short, long)]
         output: Option<PathBuf>,
+    },
+
+    /// Pack the database into a portable .heft file
+    Pack {
+        /// Root path to pack (default: indexed root)
+        path: Option<PathBuf>,
+
+        /// Output file (default: <root-basename>.heft)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+
+    /// Unpack a .heft file into the database
+    Unpack {
+        /// Input .heft file
+        input: PathBuf,
     },
 }

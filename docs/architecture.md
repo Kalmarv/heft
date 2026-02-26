@@ -35,6 +35,7 @@ Worker threads (rayon)              Main thread
 | `entry.rs` | Binary encoding/decoding of filesystem entries (LEB128) |
 | `tree.rs` | Recursive aggregation for query (build tree, compute sizes) |
 | `export.rs` | JSON export with optional compression |
+| `pack.rs` | Pack/unpack portable .heft files |
 | `error.rs` | Error types |
 
 ## Database layout
@@ -73,3 +74,45 @@ This format is append-friendly: concatenating two encoded blobs is the same as d
 **One stat call per entry** — the callback calls `symlink_metadata()` once per child and extracts file type, size, mtime, device, and block count from the same result.
 
 **main.rs imports from lib crate** — `use heft::db` instead of `mod db`. This avoids compiling every module twice (once for lib, once for bin) and ensures the compiler sees cross-crate usage of public methods.
+
+## Packed format (.heft)
+
+A `.heft` file is a single portable file containing a complete directory tree snapshot. It can be shared, emailed, or dragged into a treemap visualizer without requiring LMDB.
+
+### Binary layout
+
+```
+Offset  Size      Description
+──────  ────      ───────────
+0       4 bytes   Magic: "HEFT"
+4       1 byte    Format version (0x01)
+5       4 bytes   Metadata JSON length (u32 LE)
+9       N bytes   Metadata JSON (UTF-8)
+9+N     rest      Zstd-compressed tree JSON (compact, not pretty-printed)
+```
+
+### Metadata JSON
+
+```json
+{
+  "root": "/home",
+  "timestamp": 1740000000,
+  "heft_version": "0.1.7",
+  "file_count": 258423,
+  "dir_count": 70713,
+  "size_actual": 82899398656
+}
+```
+
+Consumers can read the first 9 + N bytes to extract metadata without decompressing the tree payload.
+
+### Rationale
+
+- **Magic bytes** — allow `heft info` and other tools to identify the file format by content, not just extension.
+- **Separate metadata** — cheap to read without decompressing the tree (useful for file browsers, info commands).
+- **Zstd compression** — level 3 gives ~20:1 compression on the JSON tree with fast decompression.
+- **Compact JSON** — `to_writer` (not `to_writer_pretty`) saves ~30% on pre-compression size.
+
+### Round-tripping
+
+`heft pack` builds the in-memory `TreeNode` tree from LMDB, serializes it as zstd-compressed JSON, and writes the `.heft` file. `heft unpack` reverses this: it deserializes the tree and reconstructs the LMDB entries by walking each directory node and encoding its children as `EntryRecord`s.

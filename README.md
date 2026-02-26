@@ -33,6 +33,16 @@ heft ls /home/user/Documents
 # Export as JSON
 heft json
 heft json --compress zstd --output tree.json.zst
+
+# Pack database into a portable .heft file
+heft pack
+heft pack -o myserver.heft
+
+# Unpack a .heft file into the database
+heft unpack myserver.heft
+
+# Inspect a packed file
+heft info myserver.heft
 ```
 
 ## Options
@@ -46,6 +56,7 @@ heft json --compress zstd --output tree.json.zst
 | `--exclude <pattern>` | Exclude paths containing `<pattern>` |
 | `--exclude-from <file>` | Read exclude patterns from file |
 | `-v, --verbose` | Print each file as it's scanned |
+| `-o, --output <file>` | Output file for `pack` and `json` |
 
 ## Database
 

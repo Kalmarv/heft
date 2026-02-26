@@ -1,11 +1,11 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::db::HeftDb;
 use crate::entry::EntryType;
 use crate::error::Result;
 
 /// A node in the aggregated directory tree, ready for JSON export.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TreeNode {
     pub name: String,
     pub size_apparent: u64,
