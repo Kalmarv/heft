@@ -3,6 +3,7 @@ use std::fs;
 use std::io::{IsTerminal, Write};
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -64,6 +65,9 @@ fn load_firmlink_excludes(root: &Path) -> HashSet<String> {
             "heft: skipping {} APFS firmlink duplicate(s) under /System/Volumes/Data",
             excludes.len()
         );
+        for p in &excludes {
+            eprintln!("heft:   exclude: {p}");
+        }
     }
     excludes
 }
@@ -97,6 +101,7 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
         crate::error::HeftError::Other(format!("cannot access '{}': {e}", root.display()))
     })?;
     let root_str = root.to_string_lossy().to_string();
+    eprintln!("heft: canonical root: {root_str}");
 
     db.clear_subtree(&root_str)?;
 
@@ -112,6 +117,7 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
     // Shared state for the closure.
     let exclude_patterns: Arc<Vec<String>> = Arc::new(opts.exclude.clone());
     let firmlink_excludes: Arc<HashSet<String>> = Arc::new(load_firmlink_excludes(&root));
+    let firmlink_hits = Arc::new(AtomicU64::new(0));
     let root_dev = if opts.one_file_system {
         fs::metadata(&root).map(|m| m.dev()).unwrap_or(0)
     } else {
@@ -129,6 +135,7 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
         .parallelism(parallelism)
         .process_read_dir({
             let firmlink_excludes = Arc::clone(&firmlink_excludes);
+            let firmlink_hits = Arc::clone(&firmlink_hits);
             move |depth, path, _state, children| {
             // depth == None means the virtual parent of root — skip.
             let depth = match depth {
@@ -172,6 +179,7 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
                 if !firmlink_excludes.is_empty() {
                     let child_str = child_path.to_string_lossy();
                     if firmlink_excludes.contains(child_str.as_ref()) {
+                        firmlink_hits.fetch_add(1, Ordering::Relaxed);
                         dir_entry.read_children_path = None;
                         continue;
                     }
@@ -345,6 +353,7 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
     if progress_visible {
         eprint!("\r\x1b[2K");
     }
+    let fl_hits = firmlink_hits.load(Ordering::Relaxed);
     eprintln!(
         "Indexed {} files in {} directories ({}) in {:.1}s",
         format_count(file_count),
@@ -352,6 +361,9 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
         format_size(total_size),
         elapsed.as_secs_f64()
     );
+    if fl_hits > 0 {
+        eprintln!("heft: firmlink exclusions matched {fl_hits} entries during walk");
+    }
 
     Ok(())
 }
