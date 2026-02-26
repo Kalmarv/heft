@@ -3,8 +3,7 @@ use std::fs;
 use std::io::{IsTerminal, Write};
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::bounded;
@@ -65,9 +64,6 @@ fn load_firmlink_excludes(root: &Path) -> HashSet<String> {
             "heft: skipping {} APFS firmlink duplicate(s) under /System/Volumes/Data",
             excludes.len()
         );
-        for p in &excludes {
-            eprintln!("heft:   exclude: {p}");
-        }
     }
     excludes
 }
@@ -101,7 +97,6 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
         crate::error::HeftError::Other(format!("cannot access '{}': {e}", root.display()))
     })?;
     let root_str = root.to_string_lossy().to_string();
-    eprintln!("heft: canonical root: {root_str}");
 
     db.clear_subtree(&root_str)?;
 
@@ -117,14 +112,12 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
     // Shared state for the closure.
     let exclude_patterns: Arc<Vec<String>> = Arc::new(opts.exclude.clone());
     let firmlink_excludes: Arc<HashSet<String>> = Arc::new(load_firmlink_excludes(&root));
-    let firmlink_hits = Arc::new(AtomicU64::new(0));
-    let root_dev = if opts.one_file_system {
-        fs::metadata(&root).map(|m| m.dev()).unwrap_or(0)
-    } else {
-        0
-    };
+    // Always detect root device so we can warn about filesystem crossings.
+    let root_dev = fs::metadata(&root).map(|m| m.dev()).unwrap_or(0);
     let one_file_system = opts.one_file_system;
     let verbose = opts.verbose;
+    // Track device IDs we have already warned about (one message per mount).
+    let warned_devs: Arc<Mutex<HashSet<u64>>> = Arc::new(Mutex::new(HashSet::new()));
 
     // Bounded channel: worker threads → main thread.
     let (tx, rx) = bounded::<DirBatch>(256);
@@ -135,7 +128,7 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
         .parallelism(parallelism)
         .process_read_dir({
             let firmlink_excludes = Arc::clone(&firmlink_excludes);
-            let firmlink_hits = Arc::clone(&firmlink_hits);
+            let warned_devs = Arc::clone(&warned_devs);
             move |depth, path, _state, children| {
             // depth == None means the virtual parent of root — skip.
             let depth = match depth {
@@ -179,7 +172,6 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
                 if !firmlink_excludes.is_empty() {
                     let child_str = child_path.to_string_lossy();
                     if firmlink_excludes.contains(child_str.as_ref()) {
-                        firmlink_hits.fetch_add(1, Ordering::Relaxed);
                         dir_entry.read_children_path = None;
                         continue;
                     }
@@ -210,6 +202,21 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
                 } else {
                     EntryType::Other
                 };
+
+                // Warn once per foreign filesystem when --one-file-system is off.
+                if !one_file_system
+                    && root_dev != 0
+                    && entry_type == EntryType::Dir
+                    && metadata.dev() != root_dev
+                {
+                    if warned_devs.lock().unwrap().insert(metadata.dev()) {
+                        warnings.push(format!(
+                            "heft: note: scanning into different filesystem at {} \
+                             (use --one-file-system to stay on one device)",
+                            child_path.display()
+                        ));
+                    }
+                }
 
                 let mtime = metadata.mtime().max(0) as u64;
                 let size_apparent = metadata.len();
@@ -286,7 +293,6 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
     let progress_interval = Duration::from_millis(100);
 
     let mut progress_visible = false;
-    let mut last_dir = String::new();
 
     for batch in &rx {
         // Print warnings and verbose lines from the worker thread,
@@ -304,7 +310,6 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
             }
         }
 
-        last_dir.clone_from(&batch.parent_path);
         if !batch.encoded.is_empty() {
             db.put_dir_in_txn(&mut wtxn, &batch.parent_path, &batch.encoded)?;
             dirs_in_txn += 1;
@@ -320,18 +325,11 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
         }
 
         if show_progress && last_progress.elapsed() >= progress_interval {
-            // Truncate path to keep the progress line from wrapping.
-            let dir_display = if last_dir.len() > 60 {
-                format!("...{}", &last_dir[last_dir.len() - 57..])
-            } else {
-                last_dir.clone()
-            };
             eprint!(
-                "\rScanning: {} files, {} dirs ({}) [{}]   ",
+                "\rScanning: {} files, {} dirs ({})...",
                 format_count(file_count),
                 format_count(dir_count),
                 format_size(total_size),
-                dir_display,
             );
             let _ = std::io::stderr().flush();
             last_progress = Instant::now();
@@ -362,7 +360,6 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
     if progress_visible {
         eprint!("\r\x1b[2K");
     }
-    let fl_hits = firmlink_hits.load(Ordering::Relaxed);
     eprintln!(
         "Indexed {} files in {} directories ({}) in {:.1}s",
         format_count(file_count),
@@ -370,9 +367,6 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
         format_size(total_size),
         elapsed.as_secs_f64()
     );
-    if fl_hits > 0 {
-        eprintln!("heft: firmlink exclusions matched {fl_hits} entries during walk");
-    }
 
     Ok(())
 }
