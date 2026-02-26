@@ -21,13 +21,19 @@ impl HeftDb {
         // LMDB expects a directory — create it if it doesn't exist.
         fs::create_dir_all(path)?;
 
+        // SAFETY: heed's `EnvOpenOptions::open` is unsafe because LMDB requires:
+        //  1. The path is a valid directory — guaranteed by `fs::create_dir_all` above.
+        //  2. No other process opens this env with incompatible flags — LMDB's own
+        //     lock file (`lock.mdb`) prevents this, and heft is a single-user CLI tool.
+        //  3. The `Env` outlives all transactions — it is stored in `HeftDb` and all
+        //     transactions borrow `&self`, so Rust's borrow checker enforces this.
         let env = unsafe {
             let mut opts = EnvOpenOptions::new();
             opts.map_size((map_size_gib as usize).saturating_mul(1024 * 1024 * 1024));
             opts.max_dbs(1);
             // WRITE_MAP: use a writable mmap, faster than default write-through.
             // MAP_ASYNC: don't flush pages to disk synchronously on commit.
-            // Safe since the DB is always re-generable via `heft index`.
+            // The DB is always re-generable via `heft index`, so durability is not needed.
             opts.flags(EnvFlags::WRITE_MAP | EnvFlags::MAP_ASYNC);
             opts.open(path)?
         };
@@ -115,6 +121,41 @@ impl HeftDb {
     pub fn clear(&self) -> Result<()> {
         let mut wtxn = self.env.write_txn()?;
         self.db.clear(&mut wtxn)?;
+        wtxn.commit()?;
+        Ok(())
+    }
+
+    /// Delete all keys under `root` (the root key itself + all children).
+    ///
+    /// Data from other roots is preserved.  The sentinel key is unaffected
+    /// because it starts with `\x00`, which sorts before any `/`-prefixed path.
+    pub fn clear_subtree(&self, root: &str) -> Result<()> {
+        // Use prefix_iter to collect matching keys (exact prefix match — "/home/"
+        // matches "/home/user" but not "/homelab"), then delete in a write txn.
+        let trimmed = root.trim_end_matches('/');
+        let child_prefix = if trimmed.is_empty() {
+            "/".to_string()
+        } else {
+            format!("{trimmed}/")
+        };
+
+        let keys: Vec<String> = {
+            let rtxn = self.env.read_txn()?;
+            let mut keys = Vec::new();
+            if self.db.get(&rtxn, root)?.is_some() {
+                keys.push(root.to_string());
+            }
+            for result in self.db.prefix_iter(&rtxn, &child_prefix)? {
+                let (key, _) = result?;
+                keys.push(key.to_string());
+            }
+            keys
+        };
+
+        let mut wtxn = self.env.write_txn()?;
+        for key in &keys {
+            self.db.delete(&mut wtxn, key)?;
+        }
         wtxn.commit()?;
         Ok(())
     }

@@ -214,7 +214,7 @@ fn format_mtime(epoch_secs: u64) -> String {
     // Clamp to i64 range to prevent wrap on corrupt/huge timestamps.
     let days_i64 = days.min(i64::MAX as u64) as i64;
     let (year, month, day) = days_to_ymd(days_i64);
-    format!("{year:04}-{month:02}-{day:02} {hours:02}:{minutes:02}")
+    format!("{year:04}-{month:02}-{day:02} {hours:02}:{minutes:02}Z")
 }
 
 fn days_to_ymd(mut days: i64) -> (i64, i64, i64) {

@@ -51,6 +51,13 @@ heft json --compress zstd --output tree.json.zst
 
 heft stores results in LMDB at `~/.heft.db`. The database is always re-generable via `heft index`, so it uses `WRITE_MAP` + `MAP_ASYNC` flags for speed (no fsync). Override the path with `-d`.
 
+Re-indexing a path only replaces data under that path — if you index `/home` and then `/var`, both coexist in the database. Timestamps are displayed in UTC.
+
+## Notes
+
+- **Network filesystems:** LMDB requires POSIX `fcntl` locking and coherent `mmap`. CIFS, NFS, and other network mounts do not provide these guarantees — store the database on a local filesystem.
+- **Database file size:** LMDB pre-allocates a sparse file sized to `--map-size-gib` (default 4 GiB). The file appears large via `ls -l` but actual disk usage is much smaller — use `du` or `heft info` to see the real size.
+
 ## AI Disclaimer
 
 This project was built with the assistance of AI tools, specifically **Claude Opus 4.6** (Anthropic) and **Gemini Pro Preview 3.1** (Google). AI-generated code may contain bugs, security issues, or other defects. This software is provided as-is with no warranty. Use at your own risk.

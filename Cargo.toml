@@ -1,6 +1,6 @@
 [package]
 name = "heft"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 rust-version = "1.79"
 description = "Fast disk usage scanner with mtime tracking"
@@ -19,6 +19,13 @@ serde_json = "1"
 flate2 = "1"
 zstd = "0.13"
 crossbeam-channel = "0.5"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "index"
+harness = false
 
 [profile.release]
 debug = true

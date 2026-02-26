@@ -16,6 +16,26 @@ fn cleanup(path: &PathBuf) {
 mod db_tests {
     use super::*;
 
+    /// Helper to populate a directory subtree in the DB.
+    fn put_subtree(db: &heft::db::HeftDb, paths: &[(&str, &[(&str, heft::entry::EntryType)])]) {
+        let mut wtxn = db.write_txn().unwrap();
+        for (dir, children) in paths {
+            let entries: Vec<_> = children
+                .iter()
+                .map(|(name, etype)| heft::entry::EntryRecord {
+                    entry_type: *etype,
+                    mtime: 1,
+                    size_apparent: 100,
+                    size_actual: 4096,
+                    name: name.to_string(),
+                })
+                .collect();
+            let encoded = heft::entry::encode_many(&entries);
+            db.put_dir_in_txn(&mut wtxn, dir, &encoded).unwrap();
+        }
+        wtxn.commit().unwrap();
+    }
+
     #[test]
     fn open_and_root_sentinel() {
         let db_path = temp_db_path("root-sentinel");
@@ -86,6 +106,91 @@ mod db_tests {
         }
 
         assert!(db.disk_size().unwrap() > 0);
+
+        cleanup(&db_path);
+    }
+
+    /// clear_subtree removes only the targeted root and its children,
+    /// leaving other roots intact.
+    #[test]
+    fn clear_subtree_preserves_other_roots() {
+        use heft::entry::EntryType::*;
+
+        let db_path = temp_db_path("clear-subtree");
+        let db = heft::db::HeftDb::open(&db_path, 1).unwrap();
+
+        // Populate two independent roots: /home and /var.
+        put_subtree(&db, &[
+            ("/home", &[("user", Dir)]),
+            ("/home/user", &[("file.txt", File)]),
+            ("/var", &[("log", Dir)]),
+            ("/var/log", &[("syslog", File)]),
+        ]);
+
+        // Clear only /home.
+        db.clear_subtree("/home").unwrap();
+
+        let rtxn = db.read_txn().unwrap();
+        // /home and its children should be gone.
+        assert!(db.get_dir_in_txn(&rtxn, "/home").unwrap().is_none());
+        assert!(db.get_dir_in_txn(&rtxn, "/home/user").unwrap().is_none());
+        // /var should be untouched.
+        assert!(db.get_dir_in_txn(&rtxn, "/var").unwrap().is_some());
+        assert!(db.get_dir_in_txn(&rtxn, "/var/log").unwrap().is_some());
+
+        cleanup(&db_path);
+    }
+
+    /// clear_subtree must not match keys that share a prefix but aren't children.
+    /// e.g. clearing "/home" must not delete "/homelab".
+    #[test]
+    fn clear_subtree_no_false_prefix_match() {
+        use heft::entry::EntryType::*;
+
+        let db_path = temp_db_path("clear-subtree-prefix");
+        let db = heft::db::HeftDb::open(&db_path, 1).unwrap();
+
+        put_subtree(&db, &[
+            ("/home", &[("user", Dir)]),
+            ("/home/user", &[("file.txt", File)]),
+            ("/homelab", &[("server", Dir)]),
+        ]);
+
+        db.clear_subtree("/home").unwrap();
+
+        let rtxn = db.read_txn().unwrap();
+        assert!(db.get_dir_in_txn(&rtxn, "/home").unwrap().is_none());
+        assert!(db.get_dir_in_txn(&rtxn, "/home/user").unwrap().is_none());
+        // /homelab must survive — it's not a child of /home.
+        assert!(db.get_dir_in_txn(&rtxn, "/homelab").unwrap().is_some());
+
+        cleanup(&db_path);
+    }
+
+    /// clear_subtree on "/" should remove all path keys but preserve the sentinel.
+    #[test]
+    fn clear_subtree_root_preserves_sentinel() {
+        use heft::entry::EntryType::*;
+
+        let db_path = temp_db_path("clear-subtree-fsroot");
+        let db = heft::db::HeftDb::open(&db_path, 1).unwrap();
+
+        db.put_root("/").unwrap();
+        put_subtree(&db, &[
+            ("/", &[("usr", Dir), ("etc", Dir)]),
+            ("/usr", &[("bin", Dir)]),
+        ]);
+
+        db.clear_subtree("/").unwrap();
+
+        {
+            let rtxn = db.read_txn().unwrap();
+            assert!(db.get_dir_in_txn(&rtxn, "/").unwrap().is_none());
+            assert!(db.get_dir_in_txn(&rtxn, "/usr").unwrap().is_none());
+        }
+        // Sentinel should survive (key starts with \x00, not /).
+        // (get_root opens its own read txn, so the previous one must be dropped first.)
+        assert!(db.get_root().unwrap().is_some());
 
         cleanup(&db_path);
     }

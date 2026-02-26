@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::io::{IsTerminal, Write};
 use std::os::unix::fs::MetadataExt;
@@ -28,7 +29,10 @@ struct DirBatch {
     encoded: Vec<u8>,
     file_count: u64,
     dir_count: u64,
+    /// Disk size of files with nlink == 1 (no dedup needed).
     size_actual: u64,
+    /// Files with nlink > 1: (dev, ino, size_actual). Deduped on the main thread.
+    hardlinks: Vec<(u64, u64, u64)>,
     /// Warning messages collected during this batch (empty in the common case).
     warnings: Vec<String>,
     /// Verbose output lines (file paths) collected during this batch.
@@ -42,7 +46,7 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
     })?;
     let root_str = root.to_string_lossy().to_string();
 
-    db.clear()?;
+    db.clear_subtree(&root_str)?;
 
     let start = Instant::now();
 
@@ -86,6 +90,7 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
             let mut batch_file_count: u64 = 0;
             let mut batch_dir_count: u64 = 0;
             let mut batch_size_actual: u64 = 0;
+            let mut hardlinks: Vec<(u64, u64, u64)> = Vec::new();
             let mut warnings: Vec<String> = Vec::new();
             let mut verbose_lines: Vec<String> = Vec::new();
 
@@ -152,7 +157,11 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
                     batch_dir_count += 1;
                 } else {
                     batch_file_count += 1;
-                    batch_size_actual += size_actual;
+                    if entry_type == EntryType::File && metadata.nlink() > 1 {
+                        hardlinks.push((metadata.dev(), metadata.ino(), size_actual));
+                    } else {
+                        batch_size_actual += size_actual;
+                    }
                 }
 
                 entries.push(EntryRecord {
@@ -168,17 +177,16 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
             let has_messages = !warnings.is_empty() || !verbose_lines.is_empty();
             if has_entries || has_messages {
                 let encoded = if has_entries { encode_many(&entries) } else { Vec::new() };
-                if tx.send(DirBatch {
+                let _ = tx.send(DirBatch {
                     parent_path: parent_str,
                     encoded,
                     file_count: batch_file_count,
                     dir_count: batch_dir_count,
                     size_actual: batch_size_actual,
+                    hardlinks,
                     warnings,
                     verbose_lines,
-                }).is_err() {
-                    return;
-                }
+                });
             }
         });
 
@@ -198,6 +206,8 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
     let mut total_size: u64 = 0;
     let mut dirs_in_txn: usize = 0;
     let mut wtxn = db.write_txn()?;
+    // Track seen inodes for hardlink dedup: (dev, ino).
+    let mut seen_inodes: HashSet<(u64, u64)> = HashSet::new();
 
     let show_progress = std::io::stderr().is_terminal() && !opts.verbose;
     let mut last_progress = Instant::now();
@@ -228,6 +238,12 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
         file_count += batch.file_count;
         dir_count += batch.dir_count;
         total_size += batch.size_actual;
+        // Dedup hardlinks: only count size for the first link we see.
+        for (dev, ino, size) in &batch.hardlinks {
+            if seen_inodes.insert((*dev, *ino)) {
+                total_size += size;
+            }
+        }
 
         if show_progress && last_progress.elapsed() >= progress_interval {
             eprint!(
