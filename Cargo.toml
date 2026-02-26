@@ -1,10 +1,10 @@
 [package]
 name = "heft"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Fast disk usage scanner with mtime tracking"
 license = "MIT"
-repository = "https://github.com/kalmarv/heft"
+repository = "https://github.com/KalmarvAI/heft"
 keywords = ["disk-usage", "du", "filesystem", "lmdb"]
 categories = ["command-line-utilities", "filesystem"]
 
