@@ -286,6 +286,7 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
     let progress_interval = Duration::from_millis(100);
 
     let mut progress_visible = false;
+    let mut last_dir = String::new();
 
     for batch in &rx {
         // Print warnings and verbose lines from the worker thread,
@@ -303,6 +304,7 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
             }
         }
 
+        last_dir.clone_from(&batch.parent_path);
         if !batch.encoded.is_empty() {
             db.put_dir_in_txn(&mut wtxn, &batch.parent_path, &batch.encoded)?;
             dirs_in_txn += 1;
@@ -318,11 +320,18 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
         }
 
         if show_progress && last_progress.elapsed() >= progress_interval {
+            // Truncate path to keep the progress line from wrapping.
+            let dir_display = if last_dir.len() > 60 {
+                format!("...{}", &last_dir[last_dir.len() - 57..])
+            } else {
+                last_dir.clone()
+            };
             eprint!(
-                "\rScanning: {} files, {} dirs ({})...",
+                "\rScanning: {} files, {} dirs ({}) [{}]   ",
                 format_count(file_count),
                 format_count(dir_count),
                 format_size(total_size),
+                dir_display,
             );
             let _ = std::io::stderr().flush();
             last_progress = Instant::now();
