@@ -257,7 +257,7 @@ pub fn format_size(bytes: u64) -> String {
     }
 }
 
-fn format_count(n: u64) -> String {
+pub fn format_count(n: u64) -> String {
     if n < 1000 {
         return n.to_string();
     }

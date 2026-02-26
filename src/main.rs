@@ -14,7 +14,7 @@ use clap::Parser;
 
 use cli::{Cli, Command};
 use db::DuxDb;
-use scanner::{format_size, ScanOptions};
+use scanner::{format_count, format_size, ScanOptions};
 
 fn main() {
     let cli = Cli::parse();
@@ -66,18 +66,22 @@ fn run(cli: Cli) -> error::Result<()> {
         Command::Info => {
             let db = DuxDb::open(&db_path)?;
             let root = db.get_root()?;
-            let count = db.entry_count()?;
             let disk = db.disk_size()?;
 
-            println!("Database: {}", db_path.display());
-            match root {
-                Some(r) => println!("Indexed root: {r}"),
-                None => println!("Indexed root: (none — run `dux index` first)"),
+            if let Some(ref root_path) = root {
+                let rtxn = db.read_txn()?;
+                let agg = tree::aggregate_sizes(&db, &rtxn, root_path)?;
+                println!(
+                    "{}  {} files  {} dirs  {}",
+                    root_path,
+                    format_count(agg.file_count),
+                    format_count(agg.dir_count),
+                    format_size(agg.size_actual),
+                );
+            } else {
+                println!("(no index — run `dux index <path>` first)");
             }
-            // Subtract 1 for the sentinel key, but don't go below 0.
-            let dir_count = if count > 0 { count - 1 } else { 0 };
-            println!("Directories: {dir_count}");
-            println!("Database size: {}", format_size(disk));
+            println!("Database: {} ({})", db_path.display(), format_size(disk));
         }
 
         Command::Ls { path } => {

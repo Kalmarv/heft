@@ -126,12 +126,6 @@ impl DuxDb {
         Ok(())
     }
 
-    /// Number of keys in the database.
-    pub fn entry_count(&self) -> Result<u64> {
-        let rtxn = self.env.read_txn()?;
-        Ok(self.db.len(&rtxn)?)
-    }
-
     /// Actual data size in the database (non-free pages only).
     /// With WRITE_MAP the file is pre-allocated to map_size, so file size is misleading.
     pub fn disk_size(&self) -> Result<u64> {

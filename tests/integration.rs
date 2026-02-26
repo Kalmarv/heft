@@ -93,25 +93,24 @@ mod db_tests {
         }]);
         db.put_batch_merge([("/test", entries.as_slice())].into_iter()).unwrap();
 
-        assert!(db.entry_count().unwrap() > 0);
+        let rtxn = db.read_txn().unwrap();
+        assert!(db.get_dir_in_txn(&rtxn, "/test").unwrap().is_some());
+        drop(rtxn);
+
         db.clear().unwrap();
-        assert_eq!(db.entry_count().unwrap(), 0);
         assert!(db.get_root().unwrap().is_none());
+        let rtxn = db.read_txn().unwrap();
+        assert!(db.get_dir_in_txn(&rtxn, "/test").unwrap().is_none());
 
         cleanup(&db_path);
     }
 
     #[test]
-    fn entry_count_and_disk_size() {
+    fn disk_size() {
         let db_path = temp_db_path("stats");
         let db = dux::db::DuxDb::open(&db_path).unwrap();
 
-        assert_eq!(db.entry_count().unwrap(), 0);
-
         db.put_root("/test").unwrap();
-        // Sentinel is 1 key.
-        assert_eq!(db.entry_count().unwrap(), 1);
-
         let entries = dux::entry::encode_many(&[dux::entry::EntryRecord {
             entry_type: dux::entry::EntryType::Dir,
             mtime: 0,
@@ -120,7 +119,6 @@ mod db_tests {
             name: "sub".into(),
         }]);
         db.put_batch_merge([("/test", entries.as_slice())].into_iter()).unwrap();
-        assert_eq!(db.entry_count().unwrap(), 2); // sentinel + /test
 
         assert!(db.disk_size().unwrap() > 0);
 
@@ -278,6 +276,11 @@ mod tree_tests {
         assert_eq!(agg.size_actual, tree.size_actual);
         assert_eq!(agg.mtime, tree.mtime);
         assert_eq!(agg.count, tree.count);
+
+        // 4 files: readme.txt, notes.txt, main.rs, photo.jpg
+        assert_eq!(agg.file_count, 4);
+        // 3 dirs: root, docs, src
+        assert_eq!(agg.dir_count, 3);
 
         cleanup(&db_path);
     }

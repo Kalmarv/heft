@@ -23,6 +23,8 @@ pub struct Aggregate {
     pub size_actual: u64,
     pub mtime: u64,
     pub count: u64,
+    pub file_count: u64,
+    pub dir_count: u64,
 }
 
 /// Build the full in-memory tree from the database starting at `root_path`.
@@ -99,6 +101,8 @@ pub fn aggregate_sizes(db: &DuxDb, rtxn: &heed::RoTxn<'_>, dir_path: &str) -> Re
     let mut size_actual: u64 = 0;
     let mut mtime: u64 = 0;
     let mut count: u64 = 0;
+    let mut file_count: u64 = 0;
+    let mut dir_count: u64 = 0;
 
     for entry in &entries {
         if entry.entry_type == EntryType::Dir {
@@ -108,20 +112,26 @@ pub fn aggregate_sizes(db: &DuxDb, rtxn: &heed::RoTxn<'_>, dir_path: &str) -> Re
             size_actual += child.size_actual;
             mtime = mtime.max(child.mtime);
             count += child.count;
+            file_count += child.file_count;
+            dir_count += child.dir_count;
         } else {
             size_apparent += entry.size_apparent;
             size_actual += entry.size_actual;
             mtime = mtime.max(entry.mtime);
             count += 1;
+            file_count += 1;
         }
     }
 
     count += 1;
+    dir_count += 1;
     Ok(Aggregate {
         size_apparent,
         size_actual,
         mtime,
         count,
+        file_count,
+        dir_count,
     })
 }
 
