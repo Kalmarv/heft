@@ -252,6 +252,100 @@ mod tree_tests {
         cleanup(&db_path);
     }
 
+    /// Regression test: when the root is "/", child paths must be "/usr" not "//usr".
+    #[test]
+    fn tree_rooted_at_filesystem_root() {
+        let db_path = temp_db_path("tree-fs-root");
+        let db = heft::db::HeftDb::open(&db_path, 1).unwrap();
+
+        db.put_root("/").unwrap();
+
+        // / contains: usr/, etc/, swap.img
+        let root_entries = heft::entry::encode_many(&[
+            heft::entry::EntryRecord {
+                entry_type: heft::entry::EntryType::Dir,
+                mtime: 0,
+                size_apparent: 0,
+                size_actual: 0,
+                name: "usr".into(),
+            },
+            heft::entry::EntryRecord {
+                entry_type: heft::entry::EntryType::Dir,
+                mtime: 0,
+                size_apparent: 0,
+                size_actual: 0,
+                name: "etc".into(),
+            },
+            heft::entry::EntryRecord {
+                entry_type: heft::entry::EntryType::File,
+                mtime: 100,
+                size_apparent: 8000,
+                size_actual: 8192,
+                name: "swap.img".into(),
+            },
+        ]);
+
+        // /usr contains: bin/
+        let usr_entries = heft::entry::encode_many(&[
+            heft::entry::EntryRecord {
+                entry_type: heft::entry::EntryType::Dir,
+                mtime: 0,
+                size_apparent: 0,
+                size_actual: 0,
+                name: "bin".into(),
+            },
+        ]);
+
+        // /usr/bin contains: ls
+        let bin_entries = heft::entry::encode_many(&[heft::entry::EntryRecord {
+            entry_type: heft::entry::EntryType::File,
+            mtime: 200,
+            size_apparent: 500,
+            size_actual: 4096,
+            name: "ls".into(),
+        }]);
+
+        // /etc contains: hosts
+        let etc_entries = heft::entry::encode_many(&[heft::entry::EntryRecord {
+            entry_type: heft::entry::EntryType::File,
+            mtime: 300,
+            size_apparent: 100,
+            size_actual: 4096,
+            name: "hosts".into(),
+        }]);
+
+        {
+            let mut wtxn = db.write_txn().unwrap();
+            db.put_dir_in_txn(&mut wtxn, "/", &root_entries).unwrap();
+            db.put_dir_in_txn(&mut wtxn, "/usr", &usr_entries).unwrap();
+            db.put_dir_in_txn(&mut wtxn, "/usr/bin", &bin_entries).unwrap();
+            db.put_dir_in_txn(&mut wtxn, "/etc", &etc_entries).unwrap();
+            wtxn.commit().unwrap();
+        }
+
+        // build_tree should correctly aggregate through "/" → "/usr" → "/usr/bin".
+        let tree = heft::tree::build_tree(&db, "/").unwrap();
+
+        // Total apparent: 8000 (swap) + 500 (ls) + 100 (hosts) = 8600
+        assert_eq!(tree.size_apparent, 8600);
+        // Total actual: 8192 (swap) + 4096 (ls) + 4096 (hosts) = 16384
+        assert_eq!(tree.size_actual, 16384);
+        // Max mtime: 300
+        assert_eq!(tree.mtime, 300);
+        // Count: 3 files + 3 dirs (/, /usr, /etc) + 1 subdir (/usr/bin) = 7
+        assert_eq!(tree.count, 7);
+
+        // aggregate_sizes should match.
+        let rtxn = db.read_txn().unwrap();
+        let agg = heft::tree::aggregate_sizes(&db, &rtxn, "/").unwrap();
+        assert_eq!(agg.size_apparent, tree.size_apparent);
+        assert_eq!(agg.size_actual, tree.size_actual);
+        assert_eq!(agg.file_count, 3);
+        assert_eq!(agg.dir_count, 4); // /, /usr, /usr/bin, /etc
+
+        cleanup(&db_path);
+    }
+
     #[test]
     fn empty_directory_produces_leaf_node() {
         let db_path = temp_db_path("tree-empty");
