@@ -1,1 +1,5 @@
 /target
+*.svg
+*.data
+*.collapsed
+perf.*
