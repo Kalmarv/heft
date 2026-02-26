@@ -7,7 +7,7 @@ use std::time::Instant;
 use crossbeam_channel::bounded;
 use jwalk::{Parallelism, WalkDir};
 
-use crate::db::DuxDb;
+use crate::db::HeftDb;
 use crate::entry::{encode_many, EntryRecord, EntryType};
 use crate::error::Result;
 
@@ -31,9 +31,9 @@ struct DirBatch {
 }
 
 /// Run the index operation: walk a directory tree and store results in the database.
-pub fn run_index(root: &Path, db: &DuxDb, opts: &ScanOptions) -> Result<()> {
+pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
     let root = fs::canonicalize(root).map_err(|e| {
-        crate::error::DuxError::Other(format!("cannot access '{}': {e}", root.display()))
+        crate::error::HeftError::Other(format!("cannot access '{}': {e}", root.display()))
     })?;
     let root_str = root.to_string_lossy().to_string();
 
@@ -105,7 +105,7 @@ pub fn run_index(root: &Path, db: &DuxDb, opts: &ScanOptions) -> Result<()> {
                 let metadata = match child_path.symlink_metadata() {
                     Ok(m) => m,
                     Err(e) => {
-                        eprintln!("dux: warning: {}: {e}", child_path.display());
+                        eprintln!("heft: warning: {}: {e}", child_path.display());
                         continue;
                     }
                 };
@@ -174,7 +174,7 @@ pub fn run_index(root: &Path, db: &DuxDb, opts: &ScanOptions) -> Result<()> {
     let walker_handle = std::thread::spawn(move || {
         for result in walker {
             if let Err(e) = result {
-                eprintln!("dux: warning: {e}");
+                eprintln!("heft: warning: {e}");
             }
         }
     });

@@ -8,14 +8,14 @@ use crate::entry::{decode_many, encode_many, EntryRecord, EntryType};
 use crate::error::Result;
 
 /// The sentinel key that stores the root path metadata.
-const ROOT_KEY: &str = "\x00__dux_root__";
+const ROOT_KEY: &str = "\x00__heft_root__";
 
-pub struct DuxDb {
+pub struct HeftDb {
     env: Env,
     db: Database<Str, Bytes>,
 }
 
-impl DuxDb {
+impl HeftDb {
     /// Open or create the database at the given path.
     pub fn open(path: &Path) -> Result<Self> {
         // LMDB expects a directory — create it if it doesn't exist.
@@ -27,7 +27,7 @@ impl DuxDb {
             opts.max_dbs(1);
             // WRITE_MAP: use a writable mmap, faster than default write-through.
             // MAP_ASYNC: don't flush pages to disk synchronously on commit.
-            // Safe for dux since the DB is always re-generable via `dux index`.
+            // Safe since the DB is always re-generable via `heft index`.
             opts.flags(EnvFlags::WRITE_MAP | EnvFlags::MAP_ASYNC);
             opts.open(path)?
         };
@@ -36,13 +36,13 @@ impl DuxDb {
         let db: Database<Str, Bytes> = env.create_database(&mut wtxn, Some("dirs"))?;
         wtxn.commit()?;
 
-        Ok(DuxDb { env, db })
+        Ok(HeftDb { env, db })
     }
 
-    /// Default database path: ~/.dux.db
+    /// Default database path: ~/.heft.db
     pub fn default_path() -> PathBuf {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-        PathBuf::from(home).join(".dux.db")
+        PathBuf::from(home).join(".heft.db")
     }
 
     /// Store the root sentinel — records which path was indexed.

@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::db::DuxDb;
+use crate::db::HeftDb;
 use crate::entry::EntryType;
 use crate::error::Result;
 
@@ -29,13 +29,13 @@ pub struct Aggregate {
 
 /// Build the full in-memory tree from the database starting at `root_path`.
 /// Opens a single read transaction for the entire traversal.
-pub fn build_tree(db: &DuxDb, root_path: &str) -> Result<TreeNode> {
+pub fn build_tree(db: &HeftDb, root_path: &str) -> Result<TreeNode> {
     let rtxn = db.read_txn()?;
     build_node(db, &rtxn, root_path, path_basename(root_path))
 }
 
 fn build_node(
-    db: &DuxDb,
+    db: &HeftDb,
     rtxn: &heed::RoTxn<'_>,
     dir_path: &str,
     name: String,
@@ -94,7 +94,7 @@ fn build_node(
 
 /// Compute aggregate sizes for a directory without building full TreeNode objects.
 /// Much cheaper than build_tree when you only need the top-level numbers.
-pub fn aggregate_sizes(db: &DuxDb, rtxn: &heed::RoTxn<'_>, dir_path: &str) -> Result<Aggregate> {
+pub fn aggregate_sizes(db: &HeftDb, rtxn: &heed::RoTxn<'_>, dir_path: &str) -> Result<Aggregate> {
     let entries = db.get_dir_in_txn(rtxn, dir_path)?.unwrap_or_default();
 
     let mut size_apparent: u64 = 0;

@@ -2,7 +2,7 @@
 
 ## Overview
 
-dux has two phases: **index** (walk filesystem, write to DB) and **query** (read DB, display results).
+heft has two phases: **index** (walk filesystem, write to DB) and **query** (read DB, display results).
 
 ## Indexing pipeline
 
@@ -43,7 +43,7 @@ LMDB with a single `dirs` database. Keys are absolute directory paths (UTF-8 str
 
 | Key | Value |
 |-----|-------|
-| `\x00__dux_root__` | Sentinel: which path was indexed |
+| `\x00__heft_root__` | Sentinel: which path was indexed |
 | `/home/user` | Encoded entries for that directory's children |
 | `/home/user/docs` | Encoded entries for docs/ children |
 
@@ -72,4 +72,4 @@ This format is append-friendly: concatenating two encoded blobs is the same as d
 
 **One stat call per entry** — the callback calls `symlink_metadata()` once per child and extracts file type, size, mtime, device, and block count from the same result.
 
-**main.rs imports from lib crate** — `use dux::db` instead of `mod db`. This avoids compiling every module twice (once for lib, once for bin) and ensures the compiler sees cross-crate usage of public methods.
+**main.rs imports from lib crate** — `use heft::db` instead of `mod db`. This avoids compiling every module twice (once for lib, once for bin) and ensures the compiler sees cross-crate usage of public methods.

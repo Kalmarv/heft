@@ -1,4 +1,4 @@
-use crate::error::{DuxError, Result};
+use crate::error::{HeftError, Result};
 
 /// Type of filesystem entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,7 +17,7 @@ impl EntryType {
             1 => Ok(EntryType::Dir),
             2 => Ok(EntryType::Symlink),
             3 => Ok(EntryType::Other),
-            _ => Err(DuxError::Encoding(format!("invalid entry type: {v}"))),
+            _ => Err(HeftError::Encoding(format!("invalid entry type: {v}"))),
         }
     }
 }
@@ -45,7 +45,7 @@ fn write_varint(buf: &mut Vec<u8>, value: u64) {
 fn read_varint(data: &[u8], pos: &mut usize) -> Result<u64> {
     let mut reader = &data[*pos..];
     let val = leb128::read::unsigned(&mut reader)
-        .map_err(|e| DuxError::Encoding(format!("leb128 read: {e}")))?;
+        .map_err(|e| HeftError::Encoding(format!("leb128 read: {e}")))?;
     // Advance pos by the number of bytes consumed.
     *pos = data.len() - reader.len();
     Ok(val)
@@ -88,7 +88,7 @@ pub fn decode_many(data: &[u8]) -> Result<Vec<EntryRecord>> {
         let size_actual = read_varint(data, &mut pos)?;
         let name_len = read_varint(data, &mut pos)? as usize;
         if pos + name_len > data.len() {
-            return Err(DuxError::Encoding("truncated name".into()));
+            return Err(HeftError::Encoding("truncated name".into()));
         }
         // Fast path: most filenames are valid UTF-8, avoid the lossy Cow allocation.
         let name_bytes = &data[pos..pos + name_len];

@@ -1,36 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ─── Benchmark: dux vs duc ──────────────────────────────────────────────
+# ─── Benchmark: heft vs duc ──────────────────────────────────────────────
 # Usage: sudo ./bench.sh <path_to_index> [runs]
 
 TARGET="${1:?Usage: sudo ./bench.sh <path> [runs]}"
 RUNS="${2:-3}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DUX="$SCRIPT_DIR/target/release/dux"
+HEFT="$SCRIPT_DIR/target/release/heft"
 DUC="$(command -v duc || true)"
-DUX_DB="/tmp/.dux-bench.db"
+HEFT_DB="/tmp/.heft-bench.db"
 DUC_DB="/tmp/.duc-bench.db"
 
 if [[ -z "$DUC" ]]; then
     echo "error: duc not found in PATH" >&2
     exit 1
 fi
-if [[ ! -x "$DUX" ]]; then
-    echo "Building dux (release)..."
+if [[ ! -x "$HEFT" ]]; then
+    echo "Building heft (release)..."
     (cd "$SCRIPT_DIR" && cargo build --release --quiet)
 fi
 
 TARGET=$(realpath "$TARGET")
 
 echo ""
-echo "  dux vs duc benchmark"
-echo "  --------------------"
+echo "  heft vs duc benchmark"
+echo "  ---------------------"
 echo "  Target:  $TARGET"
 echo "  Runs:    $RUNS"
 
 # ─── Run benchmarks ──────────────────────────────────────────────────
-declare -a DUC_TIMES DUX_TIMES
+declare -a DUC_TIMES HEFT_TIMES
 
 for i in $(seq 1 "$RUNS"); do
     printf "\r  Run %d/%d ..." "$i" "$RUNS" >&2
@@ -41,11 +41,11 @@ for i in $(seq 1 "$RUNS"); do
     DUC_END=$(date +%s%N)
     DUC_TIMES+=( $(( (DUC_END - DUC_START) / 1000000 )) )
 
-    rm -rf "$DUX_DB"
-    DUX_START=$(date +%s%N)
-    "$DUX" -d "$DUX_DB" index "$TARGET" 2>/dev/null
-    DUX_END=$(date +%s%N)
-    DUX_TIMES+=( $(( (DUX_END - DUX_START) / 1000000 )) )
+    rm -rf "$HEFT_DB"
+    HEFT_START=$(date +%s%N)
+    "$HEFT" -d "$HEFT_DB" index "$TARGET" 2>/dev/null
+    HEFT_END=$(date +%s%N)
+    HEFT_TIMES+=( $(( (HEFT_END - HEFT_START) / 1000000 )) )
 done
 printf "\r                    \r" >&2
 
@@ -56,25 +56,25 @@ DUC_FILES=$(echo "$DUC_INFO" | awk '{print $3}')
 DUC_DIRS=$(echo "$DUC_INFO" | awk '{print $4}')
 DUC_BYTES=$(echo "$DUC_INFO" | awk '{print $5}')
 
-# dux info: "/path  N files  N dirs  SIZE"
-DUX_INFO=$("$DUX" -d "$DUX_DB" info 2>/dev/null | head -1)
-DUX_FILES=$(echo "$DUX_INFO" | grep -oP '[0-9,]+(?= files)')
-DUX_DIRS=$(echo "$DUX_INFO" | grep -oP '[0-9,]+(?= dirs)')
-DUX_SIZE=$(echo "$DUX_INFO" | grep -oP '[0-9.]+ [TGMK]iB|[0-9]+ B')
+# heft info: "/path  N files  N dirs  SIZE"
+HEFT_INFO=$("$HEFT" -d "$HEFT_DB" info 2>/dev/null | head -1)
+HEFT_FILES=$(echo "$HEFT_INFO" | grep -oP '[0-9,]+(?= files)')
+HEFT_DIRS=$(echo "$HEFT_INFO" | grep -oP '[0-9,]+(?= dirs)')
+HEFT_SIZE=$(echo "$HEFT_INFO" | grep -oP '[0-9.]+ [TGMK]iB|[0-9]+ B')
 
 # Strip commas for numeric comparison.
-DUX_FILES_N=${DUX_FILES//,/}
-DUX_DIRS_N=${DUX_DIRS//,/}
+HEFT_FILES_N=${HEFT_FILES//,/}
+HEFT_DIRS_N=${HEFT_DIRS//,/}
 
 printf "  %-6s  %10s files  %10s dirs  %s\n" "duc" "$DUC_FILES" "$DUC_DIRS" "$DUC_BYTES B"
-printf "  %-6s  %10s files  %10s dirs  %s\n" "dux" "$DUX_FILES" "$DUX_DIRS" "$DUX_SIZE"
+printf "  %-6s  %10s files  %10s dirs  %s\n" "heft" "$HEFT_FILES" "$HEFT_DIRS" "$HEFT_SIZE"
 
 STATS_OK=true
-if [[ "$DUX_FILES_N" != "$DUC_FILES" ]]; then
+if [[ "$HEFT_FILES_N" != "$DUC_FILES" ]]; then
     echo "  ⚠  File count mismatch!"
     STATS_OK=false
 fi
-if [[ "$DUX_DIRS_N" != "$DUC_DIRS" ]]; then
+if [[ "$HEFT_DIRS_N" != "$DUC_DIRS" ]]; then
     echo "  ⚠  Dir count mismatch!"
     STATS_OK=false
 fi
@@ -83,20 +83,20 @@ if $STATS_OK; then
 fi
 echo ""
 
-duc_sum=0; dux_sum=0
+duc_sum=0; heft_sum=0
 for t in "${DUC_TIMES[@]}"; do duc_sum=$((duc_sum + t)); done
-for t in "${DUX_TIMES[@]}"; do dux_sum=$((dux_sum + t)); done
+for t in "${HEFT_TIMES[@]}"; do heft_sum=$((heft_sum + t)); done
 DUC_AVG=$((duc_sum / RUNS))
-DUX_AVG=$((dux_sum / RUNS))
+HEFT_AVG=$((heft_sum / RUNS))
 
-if (( DUX_AVG > 0 && DUC_AVG > 0 )); then
-    SPEEDUP=$(awk "BEGIN { printf \"%.2f\", $DUC_AVG / $DUX_AVG }")
+if (( HEFT_AVG > 0 && DUC_AVG > 0 )); then
+    SPEEDUP=$(awk "BEGIN { printf \"%.2f\", $DUC_AVG / $HEFT_AVG }")
 else
     SPEEDUP="N/A"
 fi
 
 DUC_DB_SIZE=$(du -sh "$DUC_DB" 2>/dev/null | cut -f1)
-DUX_DB_SIZE=$(du -sh "$DUX_DB" 2>/dev/null | cut -f1)
+HEFT_DB_SIZE=$(du -sh "$HEFT_DB" 2>/dev/null | cut -f1)
 
 # ─── Build table ─────────────────────────────────────────────────────────
 COL=8
@@ -119,10 +119,10 @@ for t in "${DUC_TIMES[@]}"; do row+="$(printf " %5dms" "$t")"; done
 row+="  | $(printf "%5dms" "$DUC_AVG")"
 echo "$row"
 
-# dux row
-row="$(printf "  %-6s |" "dux")"
-for t in "${DUX_TIMES[@]}"; do row+="$(printf " %5dms" "$t")"; done
-row+="  | $(printf "%5dms" "$DUX_AVG")"
+# heft row
+row="$(printf "  %-6s |" "heft")"
+for t in "${HEFT_TIMES[@]}"; do row+="$(printf " %5dms" "$t")"; done
+row+="  | $(printf "%5dms" "$HEFT_AVG")"
 echo "$row"
 
 echo "$bar"
@@ -137,7 +137,7 @@ echo ""
 echo "  DATABASE SIZE"
 echo "  ------------------"
 printf "  duc    %s\n" "$DUC_DB_SIZE"
-printf "  dux    %s\n" "$DUX_DB_SIZE"
+printf "  heft   %s\n" "$HEFT_DB_SIZE"
 echo ""
 
-rm -rf "$DUX_DB" "$DUC_DB"
+rm -rf "$HEFT_DB" "$DUC_DB"

@@ -1,8 +1,12 @@
 [package]
-name = "dux"
+name = "heft"
 version = "0.1.0"
 edition = "2021"
 description = "Fast disk usage scanner with mtime tracking"
+license = "MIT"
+repository = "https://github.com/kalmarv/heft"
+keywords = ["disk-usage", "du", "filesystem", "lmdb"]
+categories = ["command-line-utilities", "filesystem"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

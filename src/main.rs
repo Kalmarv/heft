@@ -4,25 +4,25 @@ use std::process;
 
 use clap::Parser;
 
-use dux::cli::{Cli, Command};
-use dux::db::DuxDb;
-use dux::entry;
-use dux::error;
-use dux::export;
-use dux::scanner::{self, format_count, format_size, ScanOptions};
-use dux::tree;
+use heft::cli::{Cli, Command};
+use heft::db::HeftDb;
+use heft::entry;
+use heft::error;
+use heft::export;
+use heft::scanner::{self, format_count, format_size, ScanOptions};
+use heft::tree;
 
 fn main() {
     let cli = Cli::parse();
 
     if let Err(e) = run(cli) {
-        eprintln!("dux: error: {e}");
+        eprintln!("heft: error: {e}");
         process::exit(1);
     }
 }
 
 fn run(cli: Cli) -> error::Result<()> {
-    let db_path = cli.db_path.unwrap_or_else(DuxDb::default_path);
+    let db_path = cli.db_path.unwrap_or_else(HeftDb::default_path);
 
     match cli.command {
         Command::Index {
@@ -36,7 +36,7 @@ fn run(cli: Cli) -> error::Result<()> {
             let mut exclude_patterns = exclude;
             if let Some(file) = exclude_from {
                 let contents = fs::read_to_string(&file).map_err(|e| {
-                    error::DuxError::Other(format!(
+                    error::HeftError::Other(format!(
                         "cannot read exclude file '{}': {e}",
                         file.display()
                     ))
@@ -49,7 +49,7 @@ fn run(cli: Cli) -> error::Result<()> {
                 }
             }
 
-            let db = DuxDb::open(&db_path)?;
+            let db = HeftDb::open(&db_path)?;
             let opts = ScanOptions {
                 verbose,
                 threads,
@@ -60,7 +60,7 @@ fn run(cli: Cli) -> error::Result<()> {
         }
 
         Command::Info => {
-            let db = DuxDb::open(&db_path)?;
+            let db = HeftDb::open(&db_path)?;
             let root = db.get_root()?;
             let disk = db.disk_size()?;
 
@@ -75,13 +75,13 @@ fn run(cli: Cli) -> error::Result<()> {
                     format_size(agg.size_actual),
                 );
             } else {
-                println!("(no index — run `dux index <path>` first)");
+                println!("(no index — run `heft index <path>` first)");
             }
             println!("Database: {} ({})", db_path.display(), format_size(disk));
         }
 
         Command::Ls { path } => {
-            let db = DuxDb::open(&db_path)?;
+            let db = HeftDb::open(&db_path)?;
             let dir_path = resolve_path(&db, path)?;
             run_ls(&db, &dir_path)?;
         }
@@ -91,7 +91,7 @@ fn run(cli: Cli) -> error::Result<()> {
             compress,
             output,
         } => {
-            let db = DuxDb::open(&db_path)?;
+            let db = HeftDb::open(&db_path)?;
             let root_path = resolve_path(&db, path)?;
             export::run_export(
                 &db,
@@ -106,27 +106,27 @@ fn run(cli: Cli) -> error::Result<()> {
 }
 
 /// Resolve a user-provided path, or fall back to the indexed root.
-fn resolve_path(db: &DuxDb, path: Option<PathBuf>) -> error::Result<String> {
+fn resolve_path(db: &HeftDb, path: Option<PathBuf>) -> error::Result<String> {
     match path {
         Some(p) => {
             let canonical = fs::canonicalize(&p).map_err(|e| {
-                error::DuxError::Other(format!("cannot resolve '{}': {e}", p.display()))
+                error::HeftError::Other(format!("cannot resolve '{}': {e}", p.display()))
             })?;
             Ok(canonical.to_string_lossy().to_string())
         }
         None => db.get_root()?.ok_or_else(|| {
-            error::DuxError::Other("no index found — run `dux index <path>` first".into())
+            error::HeftError::Other("no index found — run `heft index <path>` first".into())
         }),
     }
 }
 
 /// Display a directory listing with human-readable sizes.
-fn run_ls(db: &DuxDb, dir_path: &str) -> error::Result<()> {
+fn run_ls(db: &HeftDb, dir_path: &str) -> error::Result<()> {
     // Single read transaction for the entire ls operation.
     let rtxn = db.read_txn()?;
 
     let entries = db.get_dir_in_txn(&rtxn, dir_path)?.ok_or_else(|| {
-        error::DuxError::Other(format!("directory not found in database: {dir_path}"))
+        error::HeftError::Other(format!("directory not found in database: {dir_path}"))
     })?;
 
     if entries.is_empty() {

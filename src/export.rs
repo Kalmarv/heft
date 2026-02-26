@@ -5,13 +5,13 @@ use std::path::Path;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 
-use crate::db::DuxDb;
-use crate::error::{DuxError, Result};
+use crate::db::HeftDb;
+use crate::error::{HeftError, Result};
 use crate::tree::build_tree;
 
 /// Export the tree as JSON with optional compression.
 pub fn run_export(
-    db: &DuxDb,
+    db: &HeftDb,
     root_path: &str,
     compress: Option<&str>,
     output: Option<&Path>,
@@ -51,7 +51,7 @@ pub fn run_export(
             encoder.finish()?;
         }
         (Some(other), _) => {
-            return Err(DuxError::Other(format!(
+            return Err(HeftError::Other(format!(
                 "unsupported compression method: {other}"
             )));
         }

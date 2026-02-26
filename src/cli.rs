@@ -2,9 +2,9 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "dux", about = "Fast disk usage scanner with mtime tracking")]
+#[command(name = "heft", about = "Fast disk usage scanner with mtime tracking")]
 pub struct Cli {
-    /// Path to the LMDB database (default: ~/.dux.db)
+    /// Path to the LMDB database (default: ~/.heft.db)
     #[arg(short = 'd', long = "database", global = true)]
     pub db_path: Option<PathBuf>,
 

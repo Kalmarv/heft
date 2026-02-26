@@ -2,7 +2,7 @@
 
 ## bench.sh
 
-The `bench.sh` script compares dux against [duc](https://duc.zevv.nl/) on the same directory:
+The `bench.sh` script compares heft against [duc](https://duc.zevv.nl/) on the same directory:
 
 ```bash
 # Usage: sudo ./bench.sh <path> [runs]
@@ -14,13 +14,13 @@ It runs both tools `[runs]` times (default 3), compares file/dir counts to verif
 Example output:
 
 ```
-  dux vs duc benchmark
+  heft vs duc benchmark
   --------------------
   Target:  /home/user
   Runs:    3
 
   duc        258,423 files      70,713 dirs  82899398656 B
-  dux        258,423 files      70,713 dirs  77.2 GiB
+  heft        258,423 files      70,713 dirs  77.2 GiB
   ✓  Stats match
 
   INDEX SPEED
@@ -28,7 +28,7 @@ Example output:
          |     #1     #2     #3  |     avg
   -----------------------------------------------
   duc    |   850ms   820ms   830ms  |   833ms
-  dux    |   580ms   560ms   570ms  |   570ms
+  heft    |   580ms   560ms   570ms  |   570ms
   -----------------------------------------------
          |                         |   1.46x
 ```
@@ -52,7 +52,7 @@ Moved all per-entry work into jwalk's `process_read_dir` callback, which runs on
 - Write directly to LMDB with `put` (no read-modify-write merge)
 - Commit every 1,000 directories
 
-Result: the two userspace hotspots are eliminated. Flamegraph now shows ~91% kernel (filesystem I/O) and ~5% dux userspace — the tool is syscall-bound.
+Result: the two userspace hotspots are eliminated. Flamegraph now shows ~91% kernel (filesystem I/O) and ~5% heft userspace — the tool is syscall-bound.
 
 ### Key numbers
 
@@ -69,16 +69,16 @@ Generate a flamegraph with [cargo-flamegraph](https://github.com/flamegraph-rs/f
 cargo build --release   # debug = true in release profile
 
 # Using perf directly (no sudo needed if perf_event_paranoid <= 1):
-perf record -g --call-graph dwarf -F 997 -o /tmp/dux-perf.data \
-  -- ./target/release/dux index /home/user
+perf record -g --call-graph dwarf -F 997 -o /tmp/heft-perf.data \
+  -- ./target/release/heft index /home/user
 
 # Convert to flamegraph:
-perf script -i /tmp/dux-perf.data \
+perf script -i /tmp/heft-perf.data \
   | inferno-collapse-perf \
   | inferno-flamegraph > flamegraph.svg
 
 # Quick text summary of hot functions:
-perf report -i /tmp/dux-perf.data --stdio --no-children --percent-limit 1
+perf report -i /tmp/heft-perf.data --stdio --no-children --percent-limit 1
 ```
 
 The release profile has `debug = true` so perf can resolve function names without affecting optimization.
