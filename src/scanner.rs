@@ -29,6 +29,10 @@ struct DirBatch {
     file_count: u64,
     dir_count: u64,
     size_actual: u64,
+    /// Warning messages collected during this batch (empty in the common case).
+    warnings: Vec<String>,
+    /// Verbose output lines (file paths) collected during this batch.
+    verbose_lines: Vec<String>,
 }
 
 /// Run the index operation: walk a directory tree and store results in the database.
@@ -82,6 +86,8 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
             let mut batch_file_count: u64 = 0;
             let mut batch_dir_count: u64 = 0;
             let mut batch_size_actual: u64 = 0;
+            let mut warnings: Vec<String> = Vec::new();
+            let mut verbose_lines: Vec<String> = Vec::new();
 
             for child in children.iter_mut() {
                 let dir_entry = match child {
@@ -106,7 +112,7 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
                 let metadata = match child_path.symlink_metadata() {
                     Ok(m) => m,
                     Err(e) => {
-                        eprintln!("heft: warning: {}: {e}", child_path.display());
+                        warnings.push(format!("heft: warning: {}: {e}", child_path.display()));
                         continue;
                     }
                 };
@@ -139,7 +145,7 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
                     .to_owned();
 
                 if verbose && entry_type != EntryType::Dir {
-                    eprintln!("{} ({})", child_path.display(), format_size(size_apparent));
+                    verbose_lines.push(format!("{} ({})", child_path.display(), format_size(size_apparent)));
                 }
 
                 if entry_type == EntryType::Dir {
@@ -158,16 +164,19 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
                 });
             }
 
-            if !entries.is_empty() {
-                let encoded = encode_many(&entries);
+            let has_entries = !entries.is_empty();
+            let has_messages = !warnings.is_empty() || !verbose_lines.is_empty();
+            if has_entries || has_messages {
+                let encoded = if has_entries { encode_many(&entries) } else { Vec::new() };
                 if tx.send(DirBatch {
                     parent_path: parent_str,
                     encoded,
                     file_count: batch_file_count,
                     dir_count: batch_dir_count,
                     size_actual: batch_size_actual,
+                    warnings,
+                    verbose_lines,
                 }).is_err() {
-                    eprintln!("heft: warning: receiver dropped, scan results lost");
                     return;
                 }
             }
@@ -194,12 +203,31 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
     let mut last_progress = Instant::now();
     let progress_interval = Duration::from_millis(100);
 
+    let mut progress_visible = false;
+
     for batch in &rx {
-        db.put_dir_in_txn(&mut wtxn, &batch.parent_path, &batch.encoded)?;
+        // Print warnings and verbose lines from the worker thread,
+        // clearing the progress line first so they don't collide.
+        if !batch.warnings.is_empty() || !batch.verbose_lines.is_empty() {
+            if progress_visible {
+                eprint!("\r\x1b[2K");
+                progress_visible = false;
+            }
+            for w in &batch.warnings {
+                eprintln!("{w}");
+            }
+            for v in &batch.verbose_lines {
+                eprintln!("{v}");
+            }
+        }
+
+        if !batch.encoded.is_empty() {
+            db.put_dir_in_txn(&mut wtxn, &batch.parent_path, &batch.encoded)?;
+            dirs_in_txn += 1;
+        }
         file_count += batch.file_count;
         dir_count += batch.dir_count;
         total_size += batch.size_actual;
-        dirs_in_txn += 1;
 
         if show_progress && last_progress.elapsed() >= progress_interval {
             eprint!(
@@ -210,6 +238,7 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
             );
             let _ = std::io::stderr().flush();
             last_progress = Instant::now();
+            progress_visible = true;
         }
 
         if dirs_in_txn >= TXN_BATCH_SIZE {
@@ -233,7 +262,7 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
 
     let elapsed = start.elapsed();
     // Clear the progress line before printing the final summary.
-    if show_progress {
+    if progress_visible {
         eprint!("\r\x1b[2K");
     }
     eprintln!(

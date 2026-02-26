@@ -50,7 +50,7 @@ fn build_node(
 
     for entry in &entries {
         if entry.entry_type == EntryType::Dir {
-            let child_path = format!("{}/{}", dir_path, entry.name);
+            let child_path = format!("{}/{}", dir_path.trim_end_matches('/'), entry.name);
             let child_node = build_node(db, rtxn, &child_path, entry.name.clone())?;
             size_apparent += child_node.size_apparent;
             size_actual += child_node.size_actual;
@@ -106,7 +106,7 @@ pub fn aggregate_sizes(db: &HeftDb, rtxn: &heed::RoTxn<'_>, dir_path: &str) -> R
 
     for entry in &entries {
         if entry.entry_type == EntryType::Dir {
-            let child_path = format!("{}/{}", dir_path, entry.name);
+            let child_path = format!("{}/{}", dir_path.trim_end_matches('/'), entry.name);
             let child = aggregate_sizes(db, rtxn, &child_path)?;
             size_apparent += child.size_apparent;
             size_actual += child.size_actual;

@@ -155,7 +155,7 @@ fn run_ls(db: &HeftDb, dir_path: &str) -> error::Result<()> {
 
         // Use lightweight aggregate for dirs — no TreeNode allocation.
         let (apparent, actual) = if e.entry_type == entry::EntryType::Dir {
-            let child_path = format!("{}/{}", dir_path, e.name);
+            let child_path = format!("{}/{}", dir_path.trim_end_matches('/'), e.name);
             match tree::aggregate_sizes(db, &rtxn, &child_path) {
                 Ok(agg) => (agg.size_apparent, agg.size_actual),
                 Err(_) => (e.size_apparent, e.size_actual),
