@@ -1,20 +1,8 @@
-use serde::{Deserialize, Serialize};
+use heft_format::TreeNode;
 
 use crate::db::HeftDb;
 use crate::entry::EntryType;
 use crate::error::Result;
-
-/// A node in the aggregated directory tree, ready for JSON export.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TreeNode {
-    pub name: String,
-    pub size_apparent: u64,
-    pub size_actual: u64,
-    pub mtime: u64,
-    pub count: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub children: Option<Vec<TreeNode>>,
-}
 
 /// Lightweight aggregate — only computes sizes/mtime/count without building the
 /// full TreeNode graph. Used by `ls` to avoid allocating child node vectors.

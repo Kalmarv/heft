@@ -3,12 +3,13 @@ use std::path::PathBuf;
 use std::process;
 
 use clap::Parser;
+use heft_format::display::{format_count, format_size};
+use heft_format::pack;
 
 use heft::cli::{Cli, Command};
 use heft::db::HeftDb;
 use heft::error;
-use heft::pack;
-use heft::scanner::{self, format_count, format_size, ScanOptions};
+use heft::scanner::{self, ScanOptions};
 use heft::tree;
 
 fn main() {
@@ -126,10 +127,10 @@ fn run(cli: Cli) -> error::Result<()> {
 /// Strips the root prefix from the target, then walks tree children
 /// matching each remaining path component.
 fn find_node<'a>(
-    root: &'a tree::TreeNode,
+    root: &'a heft_format::TreeNode,
     root_path: &str,
     target: &str,
-) -> error::Result<&'a tree::TreeNode> {
+) -> error::Result<&'a heft_format::TreeNode> {
     let root_trimmed = root_path.trim_end_matches('/');
     let target_trimmed = target.trim_end_matches('/');
 
@@ -172,7 +173,7 @@ fn find_node<'a>(
 // ── Listing ─────────────────────────────────────────────────────────────
 
 /// Display a directory listing from a TreeNode.
-fn run_ls(node: &tree::TreeNode) -> error::Result<()> {
+fn run_ls(node: &heft_format::TreeNode) -> error::Result<()> {
     let children = node.children.as_ref().ok_or_else(|| {
         error::HeftError::Other(format!("'{}' is a file, not a directory", node.name))
     })?;

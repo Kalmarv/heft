@@ -7,7 +7,11 @@ Similar to [duc](https://duc.zevv.nl/), but faster — heft parallelizes filesys
 ## Install
 
 ```bash
+# Linux / macOS
 cargo install heft
+
+# Windows (MFT-based scanner — coming soon)
+cargo install heft-mft
 ```
 
 ## Usage

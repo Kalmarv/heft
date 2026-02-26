@@ -1,32 +1,6 @@
-[package]
-name = "heft"
-version = "0.2.0"
-edition = "2021"
-rust-version = "1.79"
-description = "Fast disk usage scanner with mtime tracking"
-license = "MIT"
-repository = "https://github.com/KalmarvAI/heft"
-keywords = ["disk-usage", "du", "filesystem", "lmdb"]
-categories = ["command-line-utilities", "filesystem"]
-
-[dependencies]
-clap = { version = "4", features = ["derive"] }
-jwalk = "0.8"
-heed = "0.20"
-leb128 = "0.2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-flate2 = "1"
-zstd = "0.13"
-crossbeam-channel = "0.5"
-tempfile = "3"
-
-[dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
-
-[[bench]]
-name = "index"
-harness = false
+[workspace]
+resolver = "2"
+members = ["crates/*"]
 
 [profile.release]
 debug = true

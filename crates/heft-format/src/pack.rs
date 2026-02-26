@@ -5,8 +5,8 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
+use crate::display::{format_count, format_size};
 use crate::error::{HeftError, Result};
-use crate::scanner::{format_count, format_size};
 use crate::tree::TreeNode;
 
 /// Magic bytes identifying a .heft file, plus format version.

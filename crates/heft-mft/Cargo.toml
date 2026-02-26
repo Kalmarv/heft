@@ -1,0 +1,13 @@
+[package]
+name = "heft-mft"
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.79"
+description = "Windows MFT-based disk usage scanner that produces .heft files"
+license = "MIT"
+repository = "https://github.com/KalmarvAI/heft"
+
+[dependencies]
+heft-format = { path = "../heft-format" }
+clap = { version = "4", features = ["derive"] }
+# ntfs = "0.4"  # future: for MFT reading
