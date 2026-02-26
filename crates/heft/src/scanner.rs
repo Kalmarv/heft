@@ -17,6 +17,57 @@ use crate::error::Result;
 /// Commit LMDB write transaction every N directories.
 const TXN_BATCH_SIZE: usize = 1_000;
 
+/// On macOS with APFS, directories like `/Users` are "firmlinks" that bridge
+/// the read-only System volume and the writable Data volume mounted at
+/// `/System/Volumes/Data`.  When scanning `/`, both copies are visible —
+/// e.g. `/Users` AND `/System/Volumes/Data/Users` — doubling every file.
+///
+/// Reads `/usr/share/firmlinks` (Apple's canonical list) and returns the
+/// Data-volume paths to skip so only the root-level firmlinks are traversed.
+fn load_firmlink_excludes(root: &Path) -> HashSet<String> {
+    let mut excludes = HashSet::new();
+    let contents = match fs::read_to_string("/usr/share/firmlinks") {
+        Ok(c) => c,
+        Err(_) => return excludes, // Not macOS, or file missing.
+    };
+
+    let root_str = root.to_string_lossy();
+    let root_str = root_str.trim_end_matches('/');
+
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        // Each line: "/FirmlinkedPath\tDataRelativePath"
+        let Some((firmlink_path, data_rel)) = line.split_once('\t') else {
+            continue;
+        };
+        let data_abs = format!("/System/Volumes/Data/{data_rel}");
+
+        // Only exclude if BOTH the firmlink and its data-volume twin fall
+        // within our scan root — otherwise there's no duplication.
+        let under_root = |p: &str| -> bool {
+            if root_str == "/" || root_str.is_empty() {
+                return true;
+            }
+            p == root_str || p.starts_with(&format!("{root_str}/"))
+        };
+
+        if under_root(firmlink_path) && under_root(&data_abs) {
+            excludes.insert(data_abs);
+        }
+    }
+
+    if !excludes.is_empty() {
+        eprintln!(
+            "heft: skipping {} APFS firmlink duplicate(s) under /System/Volumes/Data",
+            excludes.len()
+        );
+    }
+    excludes
+}
+
 pub struct ScanOptions {
     pub verbose: bool,
     pub threads: Option<usize>,
@@ -60,6 +111,7 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
 
     // Shared state for the closure.
     let exclude_patterns: Arc<Vec<String>> = Arc::new(opts.exclude.clone());
+    let firmlink_excludes: Arc<HashSet<String>> = Arc::new(load_firmlink_excludes(&root));
     let root_dev = if opts.one_file_system {
         fs::metadata(&root).map(|m| m.dev()).unwrap_or(0)
     } else {
@@ -75,7 +127,9 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
         .skip_hidden(false)
         .follow_links(false)
         .parallelism(parallelism)
-        .process_read_dir(move |depth, path, _state, children| {
+        .process_read_dir({
+            let firmlink_excludes = Arc::clone(&firmlink_excludes);
+            move |depth, path, _state, children| {
             // depth == None means the virtual parent of root — skip.
             let depth = match depth {
                 Some(d) => d,
@@ -109,6 +163,15 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
                     let excluded = exclude.iter().any(|pat| child_str.contains(pat.as_str()));
                     if excluded {
                         // Prevent descent into excluded directories.
+                        dir_entry.read_children_path = None;
+                        continue;
+                    }
+                }
+
+                // APFS firmlink dedup: skip Data-volume copies.
+                if !firmlink_excludes.is_empty() {
+                    let child_str = child_path.to_string_lossy();
+                    if firmlink_excludes.contains(child_str.as_ref()) {
                         dir_entry.read_children_path = None;
                         continue;
                     }
@@ -189,7 +252,7 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
                     verbose_lines,
                 });
             }
-        });
+        }});
 
     // Spawn thread to drive walker iteration (entries are discarded — the
     // callback does the real work).
