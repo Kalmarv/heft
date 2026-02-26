@@ -1,8 +1,9 @@
 use std::fs;
+use std::io::{IsTerminal, Write};
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crossbeam_channel::bounded;
 use jwalk::{Parallelism, WalkDir};
@@ -189,12 +190,27 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
     let mut dirs_in_txn: usize = 0;
     let mut wtxn = db.write_txn()?;
 
+    let show_progress = std::io::stderr().is_terminal() && !opts.verbose;
+    let mut last_progress = Instant::now();
+    let progress_interval = Duration::from_millis(100);
+
     for batch in &rx {
         db.put_dir_in_txn(&mut wtxn, &batch.parent_path, &batch.encoded)?;
         file_count += batch.file_count;
         dir_count += batch.dir_count;
         total_size += batch.size_actual;
         dirs_in_txn += 1;
+
+        if show_progress && last_progress.elapsed() >= progress_interval {
+            eprint!(
+                "\rScanning: {} files, {} dirs ({})...",
+                format_count(file_count),
+                format_count(dir_count),
+                format_size(total_size),
+            );
+            let _ = std::io::stderr().flush();
+            last_progress = Instant::now();
+        }
 
         if dirs_in_txn >= TXN_BATCH_SIZE {
             wtxn.commit()?;
@@ -216,6 +232,10 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
     db.put_root(&root_str)?;
 
     let elapsed = start.elapsed();
+    // Clear the progress line before printing the final summary.
+    if show_progress {
+        eprint!("\r\x1b[2K");
+    }
     eprintln!(
         "Indexed {} files in {} directories ({}) in {:.1}s",
         format_count(file_count),
