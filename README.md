@@ -50,6 +50,10 @@ heft json --compress zstd --output tree.json.zst
 
 heft stores results in LMDB at `~/.heft.db`. The database is always re-generable via `heft index`, so it uses `WRITE_MAP` + `MAP_ASYNC` flags for speed (no fsync). Override the path with `-d`.
 
+## AI Disclaimer
+
+This project was built with the assistance of AI tools, specifically **Claude Opus 4.6** (Anthropic) and **Gemini Pro Preview 3.1** (Google). AI-generated code may contain bugs, security issues, or other defects. This software is provided as-is with no warranty. Use at your own risk.
+
 ## See also
 
 - [docs/architecture.md](docs/architecture.md) — how heft works internally
