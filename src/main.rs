@@ -1,20 +1,16 @@
-mod cli;
-mod db;
-mod entry;
-mod error;
-mod export;
-mod scanner;
-mod tree;
-
 use std::fs;
 use std::path::PathBuf;
 use std::process;
 
 use clap::Parser;
 
-use cli::{Cli, Command};
-use db::DuxDb;
-use scanner::{format_count, format_size, ScanOptions};
+use dux::cli::{Cli, Command};
+use dux::db::DuxDb;
+use dux::entry;
+use dux::error;
+use dux::export;
+use dux::scanner::{self, format_count, format_size, ScanOptions};
+use dux::tree;
 
 fn main() {
     let cli = Cli::parse();

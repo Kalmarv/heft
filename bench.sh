@@ -29,20 +29,25 @@ echo "  --------------------"
 echo "  Target:  $TARGET"
 echo "  Runs:    $RUNS"
 
-# ─── First run: warm up and capture stats ─────────────────────────────
+# ─── Run benchmarks ──────────────────────────────────────────────────
 declare -a DUC_TIMES DUX_TIMES
 
-rm -f "$DUC_DB"
-DUC_START=$(date +%s%N)
-"$DUC" index -d "$DUC_DB" "$TARGET" 2>/dev/null
-DUC_END=$(date +%s%N)
-DUC_TIMES+=( $(( (DUC_END - DUC_START) / 1000000 )) )
+for i in $(seq 1 "$RUNS"); do
+    printf "\r  Run %d/%d ..." "$i" "$RUNS" >&2
 
-rm -rf "$DUX_DB"
-DUX_START=$(date +%s%N)
-DUX_SUMMARY=$("$DUX" -d "$DUX_DB" index "$TARGET" 2>&1 >/dev/null)
-DUX_END=$(date +%s%N)
-DUX_TIMES+=( $(( (DUX_END - DUX_START) / 1000000 )) )
+    rm -f "$DUC_DB"
+    DUC_START=$(date +%s%N)
+    "$DUC" index -d "$DUC_DB" "$TARGET" 2>/dev/null
+    DUC_END=$(date +%s%N)
+    DUC_TIMES+=( $(( (DUC_END - DUC_START) / 1000000 )) )
+
+    rm -rf "$DUX_DB"
+    DUX_START=$(date +%s%N)
+    "$DUX" -d "$DUX_DB" index "$TARGET" 2>/dev/null
+    DUX_END=$(date +%s%N)
+    DUX_TIMES+=( $(( (DUX_END - DUX_START) / 1000000 )) )
+done
+printf "\r                    \r" >&2
 
 # ─── Compare stats ───────────────────────────────────────────────────
 # duc info -b: "Date       Time       Files    Dirs    Size Path"
@@ -77,21 +82,6 @@ if $STATS_OK; then
     echo "  ✓  Stats match"
 fi
 echo ""
-
-# ─── Remaining runs ───────────────────────────────────────────────────
-for i in $(seq 2 "$RUNS"); do
-    rm -f "$DUC_DB"
-    DUC_START=$(date +%s%N)
-    "$DUC" index -d "$DUC_DB" "$TARGET" 2>/dev/null
-    DUC_END=$(date +%s%N)
-    DUC_TIMES+=( $(( (DUC_END - DUC_START) / 1000000 )) )
-
-    rm -rf "$DUX_DB"
-    DUX_START=$(date +%s%N)
-    "$DUX" -d "$DUX_DB" index "$TARGET" 2>/dev/null
-    DUX_END=$(date +%s%N)
-    DUX_TIMES+=( $(( (DUX_END - DUX_START) / 1000000 )) )
-done
 
 duc_sum=0; dux_sum=0
 for t in "${DUC_TIMES[@]}"; do duc_sum=$((duc_sum + t)); done

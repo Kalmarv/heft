@@ -1,17 +1,18 @@
-use rustc_hash::FxHashMap;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Instant;
 
+use crossbeam_channel::bounded;
 use jwalk::{Parallelism, WalkDir};
 
 use crate::db::DuxDb;
 use crate::entry::{encode_many, EntryRecord, EntryType};
 use crate::error::Result;
 
-/// Maximum number of parent directories to accumulate before flushing to DB.
-const BATCH_FLUSH_THRESHOLD: usize = 10_000;
+/// Commit LMDB write transaction every N directories.
+const TXN_BATCH_SIZE: usize = 1_000;
 
 pub struct ScanOptions {
     pub verbose: bool,
@@ -20,16 +21,13 @@ pub struct ScanOptions {
     pub exclude: Vec<String>,
 }
 
-struct ScanState {
-    dir_entries: FxHashMap<String, Vec<EntryRecord>>,
+/// Channel message: one fully-encoded directory.
+struct DirBatch {
+    parent_path: String,
+    encoded: Vec<u8>,
     file_count: u64,
     dir_count: u64,
-    total_size: u64,
-    // Cache: jwalk yields entries roughly grouped by parent directory,
-    // so we avoid re-allocating and re-validating the same parent string
-    // for every file in a directory.
-    last_parent_path: std::path::PathBuf,
-    last_parent_str: String,
+    size_actual: u64,
 }
 
 /// Run the index operation: walk a directory tree and store results in the database.
@@ -50,65 +48,166 @@ pub fn run_index(root: &Path, db: &DuxDb, opts: &ScanOptions) -> Result<()> {
         },
     };
 
-    let mut state = ScanState {
-        dir_entries: FxHashMap::default(),
-        file_count: 0,
-        dir_count: 0,
-        total_size: 0,
-        last_parent_path: std::path::PathBuf::new(),
-        last_parent_str: String::new(),
-    };
-
-    // Build walker — two branches because process_read_dir changes the generic type.
-    if opts.one_file_system {
-        let root_dev = fs::metadata(&root).map(|m| m.dev()).unwrap_or(0);
-        let walker = WalkDir::new(&root)
-            .skip_hidden(false)
-            .follow_links(false)
-            .parallelism(parallelism)
-            .process_read_dir(move |_depth, _path, _state, children| {
-                children.retain(|entry| {
-                    if let Ok(ref e) = entry {
-                        if let Ok(meta) = e.path().symlink_metadata() {
-                            return meta.dev() == root_dev;
-                        }
-                    }
-                    true
-                });
-            });
-        for result in walker {
-            match result {
-                Ok(entry) => {
-                    let path = entry.path();
-                    // Use file_type from jwalk (already available from readdir) to
-                    // avoid a full stat call for type detection.
-                    let ft = entry.file_type;
-                    process_entry(&root, &path, ft, opts, db, &mut state)?;
-                }
-                Err(e) => eprintln!("dux: warning: {e}"),
-            }
-        }
+    // Shared state for the closure.
+    let exclude_patterns: Arc<Vec<String>> = Arc::new(opts.exclude.clone());
+    let root_dev = if opts.one_file_system {
+        fs::metadata(&root).map(|m| m.dev()).unwrap_or(0)
     } else {
-        let walker = WalkDir::new(&root)
-            .skip_hidden(false)
-            .follow_links(false)
-            .parallelism(parallelism);
-        for result in walker {
-            match result {
-                Ok(entry) => {
-                    let path = entry.path();
-                    let ft = entry.file_type;
-                    process_entry(&root, &path, ft, opts, db, &mut state)?;
+        0
+    };
+    let one_file_system = opts.one_file_system;
+    let verbose = opts.verbose;
+
+    // Bounded channel: worker threads → main thread.
+    let (tx, rx) = bounded::<DirBatch>(256);
+
+    let walker = WalkDir::new(&root)
+        .skip_hidden(false)
+        .follow_links(false)
+        .parallelism(parallelism)
+        .process_read_dir(move |depth, path, _state, children| {
+            // depth == None means the virtual parent of root — skip.
+            let depth = match depth {
+                Some(d) => d,
+                None => return,
+            };
+            // At depth 0, path is the root itself. We stat its children.
+            let _ = depth;
+
+            let parent_str = path.to_string_lossy().to_string();
+            let exclude = &*exclude_patterns;
+
+            let mut entries = Vec::with_capacity(children.len());
+            let mut batch_file_count: u64 = 0;
+            let mut batch_dir_count: u64 = 0;
+            let mut batch_size_actual: u64 = 0;
+
+            for child in children.iter_mut() {
+                let dir_entry = match child {
+                    Ok(ref mut e) => e,
+                    Err(_) => continue,
+                };
+
+                let child_path = dir_entry.path();
+
+                // Exclusion check.
+                if !exclude.is_empty() {
+                    let child_str = child_path.to_string_lossy();
+                    let excluded = exclude.iter().any(|pat| child_str.contains(pat.as_str()));
+                    if excluded {
+                        // Prevent descent into excluded directories.
+                        dir_entry.read_children_path = None;
+                        continue;
+                    }
                 }
-                Err(e) => eprintln!("dux: warning: {e}"),
+
+                // Single stat call per entry.
+                let metadata = match child_path.symlink_metadata() {
+                    Ok(m) => m,
+                    Err(e) => {
+                        eprintln!("dux: warning: {}: {e}", child_path.display());
+                        continue;
+                    }
+                };
+
+                // Cross-device check (one_file_system).
+                if one_file_system && metadata.dev() != root_dev {
+                    dir_entry.read_children_path = None;
+                    continue;
+                }
+
+                let ft = metadata.file_type();
+                let entry_type = if ft.is_file() {
+                    EntryType::File
+                } else if ft.is_dir() {
+                    EntryType::Dir
+                } else if ft.is_symlink() {
+                    EntryType::Symlink
+                } else {
+                    EntryType::Other
+                };
+
+                let mtime = metadata.mtime().max(0) as u64;
+                let size_apparent = metadata.len();
+                let size_actual = metadata.blocks() * 512;
+
+                let name = child_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default()
+                    .to_owned();
+
+                if verbose && entry_type != EntryType::Dir {
+                    eprintln!("{} ({})", child_path.display(), format_size(size_apparent));
+                }
+
+                if entry_type == EntryType::Dir {
+                    batch_dir_count += 1;
+                } else {
+                    batch_file_count += 1;
+                    batch_size_actual += size_actual;
+                }
+
+                entries.push(EntryRecord {
+                    entry_type,
+                    mtime,
+                    size_apparent,
+                    size_actual,
+                    name,
+                });
             }
+
+            if !entries.is_empty() {
+                let encoded = encode_many(&entries);
+                let _ = tx.send(DirBatch {
+                    parent_path: parent_str,
+                    encoded,
+                    file_count: batch_file_count,
+                    dir_count: batch_dir_count,
+                    size_actual: batch_size_actual,
+                });
+            }
+        });
+
+    // Spawn thread to drive walker iteration (entries are discarded — the
+    // callback does the real work).
+    let walker_handle = std::thread::spawn(move || {
+        for result in walker {
+            if let Err(e) = result {
+                eprintln!("dux: warning: {e}");
+            }
+        }
+    });
+
+    // Main thread: receive encoded directories, batch-write to LMDB.
+    let mut file_count: u64 = 0;
+    let mut dir_count: u64 = 0;
+    let mut total_size: u64 = 0;
+    let mut dirs_in_txn: usize = 0;
+    let mut wtxn = db.write_txn()?;
+
+    for batch in &rx {
+        db.put_dir_in_txn(&mut wtxn, &batch.parent_path, &batch.encoded)?;
+        file_count += batch.file_count;
+        dir_count += batch.dir_count;
+        total_size += batch.size_actual;
+        dirs_in_txn += 1;
+
+        if dirs_in_txn >= TXN_BATCH_SIZE {
+            wtxn.commit()?;
+            wtxn = db.write_txn()?;
+            dirs_in_txn = 0;
         }
     }
 
-    // Flush remaining entries.
-    if !state.dir_entries.is_empty() {
-        flush_batch(db, &mut state.dir_entries)?;
-    }
+    // Commit remaining writes.
+    wtxn.commit()?;
+
+    // Wait for walker thread.
+    walker_handle.join().expect("walker thread panicked");
+
+    // +1 for the root directory itself.
+    dir_count += 1;
 
     // Store the root sentinel.
     db.put_root(&root_str)?;
@@ -116,124 +215,13 @@ pub fn run_index(root: &Path, db: &DuxDb, opts: &ScanOptions) -> Result<()> {
     let elapsed = start.elapsed();
     eprintln!(
         "Indexed {} files in {} directories ({}) in {:.1}s",
-        format_count(state.file_count),
-        format_count(state.dir_count),
-        format_size(state.total_size),
+        format_count(file_count),
+        format_count(dir_count),
+        format_size(total_size),
         elapsed.as_secs_f64()
     );
 
     Ok(())
-}
-
-fn process_entry(
-    root: &Path,
-    path: &Path,
-    file_type: std::fs::FileType,
-    opts: &ScanOptions,
-    db: &DuxDb,
-    state: &mut ScanState,
-) -> Result<()> {
-    // Skip excluded paths.
-    if should_exclude(path, &opts.exclude) {
-        return Ok(());
-    }
-
-    let entry_type = if file_type.is_file() {
-        EntryType::File
-    } else if file_type.is_dir() {
-        EntryType::Dir
-    } else if file_type.is_symlink() {
-        EntryType::Symlink
-    } else {
-        EntryType::Other
-    };
-
-    // The root directory itself: just track as a dir, don't add to a parent.
-    if path == root {
-        state.dir_count += 1;
-        return Ok(());
-    }
-
-    // Single stat call for size/mtime — we already got the file_type from readdir
-    // for free via jwalk, so this is the only stat syscall per entry.
-    let metadata = match path.symlink_metadata() {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!("dux: warning: {}: {e}", path.display());
-            return Ok(());
-        }
-    };
-
-    let mtime = metadata.mtime().max(0) as u64;
-    let size_apparent = metadata.len();
-    let size_actual = metadata.blocks() * 512;
-
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or_default()
-        .to_owned();
-
-    // Cache parent string — only re-derive when the parent directory changes.
-    let parent_path = path.parent().unwrap_or_else(|| Path::new(""));
-    if parent_path != state.last_parent_path {
-        state.last_parent_path = parent_path.to_path_buf();
-        state.last_parent_str = parent_path.to_string_lossy().into_owned();
-    }
-
-    if entry_type == EntryType::Dir {
-        state.dir_count += 1;
-    } else {
-        state.file_count += 1;
-        state.total_size += size_actual;
-    }
-
-    if opts.verbose && entry_type != EntryType::Dir {
-        eprintln!("{} ({})", path.display(), format_size(size_apparent));
-    }
-
-    state
-        .dir_entries
-        .entry(state.last_parent_str.clone())
-        .or_default()
-        .push(EntryRecord {
-            entry_type,
-            mtime,
-            size_apparent,
-            size_actual,
-            name,
-        });
-
-    // Flush accumulated entries periodically.
-    if state.dir_entries.len() >= BATCH_FLUSH_THRESHOLD {
-        flush_batch(db, &mut state.dir_entries)?;
-    }
-
-    Ok(())
-}
-
-fn flush_batch(db: &DuxDb, dir_entries: &mut FxHashMap<String, Vec<EntryRecord>>) -> Result<()> {
-    let batch: Vec<(String, Vec<u8>)> = dir_entries
-        .drain()
-        .map(|(path, entries)| (path, encode_many(&entries)))
-        .collect();
-    // Use merge variant so entries for the same directory across multiple
-    // flushes are appended rather than overwritten.
-    db.put_batch_merge(batch.iter().map(|(p, e)| (p.as_str(), e.as_slice())))?;
-    Ok(())
-}
-
-fn should_exclude(path: &Path, patterns: &[String]) -> bool {
-    if patterns.is_empty() {
-        return false;
-    }
-    let path_str = path.to_string_lossy();
-    for pattern in patterns {
-        if path_str.contains(pattern.as_str()) {
-            return true;
-        }
-    }
-    false
 }
 
 // ── Formatting helpers ──────────────────────────────────────────────────

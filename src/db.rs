@@ -94,6 +94,23 @@ impl DuxDb {
         Ok(self.env.read_txn()?)
     }
 
+    /// Begin a write transaction (for external batch use).
+    pub fn write_txn(&self) -> Result<heed::RwTxn<'_>> {
+        Ok(self.env.write_txn()?)
+    }
+
+    /// Write a directory's encoded entries in an existing write transaction.
+    /// No merge — the caller guarantees the data is complete for this key.
+    pub fn put_dir_in_txn(
+        &self,
+        wtxn: &mut heed::RwTxn<'_>,
+        dir_path: &str,
+        encoded: &[u8],
+    ) -> Result<()> {
+        self.db.put(wtxn, dir_path, encoded)?;
+        Ok(())
+    }
+
     /// Batch-write multiple directories in a single transaction.
     /// Merges with any existing entries for the same key to avoid data loss
     /// when a directory's entries are split across multiple flush batches.
