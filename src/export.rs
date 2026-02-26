@@ -10,6 +10,9 @@ use crate::error::{HeftError, Result};
 use crate::tree::build_tree;
 
 /// Export the tree as JSON with optional compression.
+///
+/// Streams JSON directly into the output writer via `serde_json::to_writer_pretty`,
+/// avoiding an intermediate `String` allocation that would duplicate the tree in memory.
 pub fn run_export(
     db: &HeftDb,
     root_path: &str,
@@ -17,18 +20,18 @@ pub fn run_export(
     output: Option<&Path>,
 ) -> Result<()> {
     let tree = build_tree(db, root_path)?;
-    let json = serde_json::to_string_pretty(&tree)?;
-    let json_bytes = json.as_bytes();
 
     match (compress, output) {
         // No compression, stdout.
         (None, None) => {
-            io::stdout().write_all(json_bytes)?;
-            io::stdout().write_all(b"\n")?;
+            let mut out = io::stdout();
+            serde_json::to_writer_pretty(&mut out, &tree)?;
+            out.write_all(b"\n")?;
         }
         // No compression, file.
         (None, Some(path)) => {
-            File::create(path)?.write_all(json_bytes)?;
+            let out = File::create(path)?;
+            serde_json::to_writer_pretty(out, &tree)?;
         }
         // Gzip compression.
         (Some("gzip"), output_path) => {
@@ -37,7 +40,7 @@ pub fn run_export(
                 None => Box::new(io::stdout()),
             };
             let mut encoder = GzEncoder::new(writer, Compression::default());
-            encoder.write_all(json_bytes)?;
+            serde_json::to_writer_pretty(&mut encoder, &tree)?;
             encoder.finish()?;
         }
         // Zstd compression.
@@ -47,7 +50,7 @@ pub fn run_export(
                 None => Box::new(io::stdout()),
             };
             let mut encoder = zstd::Encoder::new(writer, 3)?;
-            encoder.write_all(json_bytes)?;
+            serde_json::to_writer_pretty(&mut encoder, &tree)?;
             encoder.finish()?;
         }
         (Some(other), _) => {
