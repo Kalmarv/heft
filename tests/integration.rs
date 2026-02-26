@@ -36,49 +36,6 @@ mod db_tests {
     }
 
     #[test]
-    fn put_batch_merge_and_read() {
-        let db_path = temp_db_path("batch-merge");
-        let db = heft::db::HeftDb::open(&db_path).unwrap();
-
-        let entries_a = heft::entry::encode_many(&[heft::entry::EntryRecord {
-            entry_type: heft::entry::EntryType::File,
-            mtime: 100,
-            size_apparent: 1000,
-            size_actual: 4096,
-            name: "file_a.txt".into(),
-        }]);
-
-        let entries_b = heft::entry::encode_many(&[heft::entry::EntryRecord {
-            entry_type: heft::entry::EntryType::File,
-            mtime: 200,
-            size_apparent: 2000,
-            size_actual: 4096,
-            name: "file_b.txt".into(),
-        }]);
-
-        // First batch: write file_a under /some/dir.
-        db.put_batch_merge(
-            [("/some/dir", entries_a.as_slice())].into_iter(),
-        )
-        .unwrap();
-
-        // Second batch: write file_b under the SAME key.
-        db.put_batch_merge(
-            [("/some/dir", entries_b.as_slice())].into_iter(),
-        )
-        .unwrap();
-
-        // Both entries should be present (merged, not overwritten).
-        let rtxn = db.read_txn().unwrap();
-        let entries = db.get_dir_in_txn(&rtxn, "/some/dir").unwrap().unwrap();
-        assert_eq!(entries.len(), 2, "expected 2 entries after merge, got {}", entries.len());
-        assert_eq!(entries[0].name, "file_a.txt");
-        assert_eq!(entries[1].name, "file_b.txt");
-
-        cleanup(&db_path);
-    }
-
-    #[test]
     fn clear_wipes_everything() {
         let db_path = temp_db_path("clear");
         let db = heft::db::HeftDb::open(&db_path).unwrap();
@@ -91,7 +48,11 @@ mod db_tests {
             size_actual: 1,
             name: "x".into(),
         }]);
-        db.put_batch_merge([("/test", entries.as_slice())].into_iter()).unwrap();
+        {
+            let mut wtxn = db.write_txn().unwrap();
+            db.put_dir_in_txn(&mut wtxn, "/test", &entries).unwrap();
+            wtxn.commit().unwrap();
+        }
 
         let rtxn = db.read_txn().unwrap();
         assert!(db.get_dir_in_txn(&rtxn, "/test").unwrap().is_some());
@@ -118,7 +79,11 @@ mod db_tests {
             size_actual: 4096,
             name: "sub".into(),
         }]);
-        db.put_batch_merge([("/test", entries.as_slice())].into_iter()).unwrap();
+        {
+            let mut wtxn = db.write_txn().unwrap();
+            db.put_dir_in_txn(&mut wtxn, "/test", &entries).unwrap();
+            wtxn.commit().unwrap();
+        }
 
         assert!(db.disk_size().unwrap() > 0);
 
@@ -169,8 +134,6 @@ mod tree_tests {
                 name: "photo.jpg".into(),
             },
         ]);
-        db.put_batch_merge([("/root", root_entries.as_slice())].into_iter())
-            .unwrap();
 
         // /root/docs contains: readme.txt, notes.txt
         let docs_entries = heft::entry::encode_many(&[
@@ -189,8 +152,6 @@ mod tree_tests {
                 name: "notes.txt".into(),
             },
         ]);
-        db.put_batch_merge([("/root/docs", docs_entries.as_slice())].into_iter())
-            .unwrap();
 
         // /root/src contains: main.rs
         let src_entries = heft::entry::encode_many(&[heft::entry::EntryRecord {
@@ -200,8 +161,14 @@ mod tree_tests {
             size_actual: 4096,
             name: "main.rs".into(),
         }]);
-        db.put_batch_merge([("/root/src", src_entries.as_slice())].into_iter())
-            .unwrap();
+
+        {
+            let mut wtxn = db.write_txn().unwrap();
+            db.put_dir_in_txn(&mut wtxn, "/root", &root_entries).unwrap();
+            db.put_dir_in_txn(&mut wtxn, "/root/docs", &docs_entries).unwrap();
+            db.put_dir_in_txn(&mut wtxn, "/root/src", &src_entries).unwrap();
+            wtxn.commit().unwrap();
+        }
 
         (db_path, db)
     }

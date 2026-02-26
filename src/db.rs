@@ -111,30 +111,6 @@ impl HeftDb {
         Ok(())
     }
 
-    /// Batch-write multiple directories in a single transaction.
-    /// Merges with any existing entries for the same key to avoid data loss
-    /// when a directory's entries are split across multiple flush batches.
-    pub fn put_batch_merge<'a>(
-        &self,
-        dirs: impl Iterator<Item = (&'a str, &'a [u8])>,
-    ) -> Result<()> {
-        let mut wtxn = self.env.write_txn()?;
-        for (path, new_encoded) in dirs {
-            if let Some(existing) = self.db.get(&wtxn, path)? {
-                // O(1) merge: our binary format is a headerless sequence of entries,
-                // so concatenating raw bytes is identical to decode+extend+encode.
-                let mut merged = Vec::with_capacity(existing.len() + new_encoded.len());
-                merged.extend_from_slice(existing);
-                merged.extend_from_slice(new_encoded);
-                self.db.put(&mut wtxn, path, &merged)?;
-            } else {
-                self.db.put(&mut wtxn, path, new_encoded)?;
-            }
-        }
-        wtxn.commit()?;
-        Ok(())
-    }
-
     /// Wipe all entries from the database.
     pub fn clear(&self) -> Result<()> {
         let mut wtxn = self.env.write_txn()?;

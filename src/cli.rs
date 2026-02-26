@@ -31,7 +31,7 @@ pub enum Command {
         #[arg(long)]
         one_file_system: bool,
 
-        /// Exclude paths matching a glob pattern (can be repeated)
+        /// Exclude paths containing this substring (can be repeated)
         #[arg(long)]
         exclude: Vec<String>,
 

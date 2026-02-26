@@ -199,16 +199,15 @@ fn run_ls(db: &HeftDb, dir_path: &str) -> error::Result<()> {
 }
 
 fn format_mtime(epoch_secs: u64) -> String {
-    // Simple ISO-ish date without pulling in chrono.
-    let secs = epoch_secs as i64;
-    // Use a basic approach: days since epoch.
-    let days = secs / 86400;
-    let time_of_day = secs % 86400;
+    // All math in u64 (input is non-negative), only narrowing to i64 for days_to_ymd.
+    let days = epoch_secs / 86400;
+    let time_of_day = epoch_secs % 86400;
     let hours = time_of_day / 3600;
     let minutes = (time_of_day % 3600) / 60;
 
-    // Compute year/month/day from days since epoch (1970-01-01).
-    let (year, month, day) = days_to_ymd(days);
+    // Clamp to i64 range to prevent wrap on corrupt/huge timestamps.
+    let days_i64 = days.min(i64::MAX as u64) as i64;
+    let (year, month, day) = days_to_ymd(days_i64);
     format!("{year:04}-{month:02}-{day:02} {hours:02}:{minutes:02}")
 }
 

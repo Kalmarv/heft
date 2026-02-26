@@ -159,13 +159,16 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
 
             if !entries.is_empty() {
                 let encoded = encode_many(&entries);
-                let _ = tx.send(DirBatch {
+                if tx.send(DirBatch {
                     parent_path: parent_str,
                     encoded,
                     file_count: batch_file_count,
                     dir_count: batch_dir_count,
                     size_actual: batch_size_actual,
-                });
+                }).is_err() {
+                    eprintln!("heft: warning: receiver dropped, scan results lost");
+                    return;
+                }
             }
         });
 
