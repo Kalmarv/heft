@@ -8,6 +8,10 @@ pub struct Cli {
     #[arg(short = 'd', long = "database", global = true)]
     pub db_path: Option<PathBuf>,
 
+    /// LMDB map size in GiB (default: 4)
+    #[arg(long, global = true, default_value_t = 4)]
+    pub map_size_gib: u64,
+
     #[command(subcommand)]
     pub command: Command,
 }

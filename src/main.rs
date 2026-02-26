@@ -23,6 +23,7 @@ fn main() {
 
 fn run(cli: Cli) -> error::Result<()> {
     let db_path = cli.db_path.unwrap_or_else(HeftDb::default_path);
+    let map_size_gib = cli.map_size_gib;
 
     match cli.command {
         Command::Index {
@@ -49,7 +50,7 @@ fn run(cli: Cli) -> error::Result<()> {
                 }
             }
 
-            let db = HeftDb::open(&db_path)?;
+            let db = HeftDb::open(&db_path, map_size_gib)?;
             let opts = ScanOptions {
                 verbose,
                 threads,
@@ -60,7 +61,7 @@ fn run(cli: Cli) -> error::Result<()> {
         }
 
         Command::Info => {
-            let db = HeftDb::open(&db_path)?;
+            let db = HeftDb::open(&db_path, map_size_gib)?;
             let root = db.get_root()?;
             let disk = db.disk_size()?;
 
@@ -81,7 +82,7 @@ fn run(cli: Cli) -> error::Result<()> {
         }
 
         Command::Ls { path } => {
-            let db = HeftDb::open(&db_path)?;
+            let db = HeftDb::open(&db_path, map_size_gib)?;
             let dir_path = resolve_path(&db, path)?;
             run_ls(&db, &dir_path)?;
         }
@@ -91,7 +92,7 @@ fn run(cli: Cli) -> error::Result<()> {
             compress,
             output,
         } => {
-            let db = HeftDb::open(&db_path)?;
+            let db = HeftDb::open(&db_path, map_size_gib)?;
             let root_path = resolve_path(&db, path)?;
             export::run_export(
                 &db,
@@ -106,13 +107,16 @@ fn run(cli: Cli) -> error::Result<()> {
 }
 
 /// Resolve a user-provided path, or fall back to the indexed root.
+///
+/// Uses `std::path::absolute` instead of `fs::canonicalize` so that symlinks
+/// are not followed (avoiding key mismatches) and the path need not exist on disk.
 fn resolve_path(db: &HeftDb, path: Option<PathBuf>) -> error::Result<String> {
     match path {
         Some(p) => {
-            let canonical = fs::canonicalize(&p).map_err(|e| {
+            let abs = std::path::absolute(&p).map_err(|e| {
                 error::HeftError::Other(format!("cannot resolve '{}': {e}", p.display()))
             })?;
-            Ok(canonical.to_string_lossy().to_string())
+            Ok(abs.to_string_lossy().to_string())
         }
         None => db.get_root()?.ok_or_else(|| {
             error::HeftError::Other("no index found — run `heft index <path>` first".into())

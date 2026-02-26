@@ -19,7 +19,7 @@ mod db_tests {
     #[test]
     fn open_and_root_sentinel() {
         let db_path = temp_db_path("root-sentinel");
-        let db = heft::db::HeftDb::open(&db_path).unwrap();
+        let db = heft::db::HeftDb::open(&db_path, 1).unwrap();
 
         // No root initially.
         assert!(db.get_root().unwrap().is_none());
@@ -38,7 +38,7 @@ mod db_tests {
     #[test]
     fn clear_wipes_everything() {
         let db_path = temp_db_path("clear");
-        let db = heft::db::HeftDb::open(&db_path).unwrap();
+        let db = heft::db::HeftDb::open(&db_path, 1).unwrap();
 
         db.put_root("/test").unwrap();
         let entries = heft::entry::encode_many(&[heft::entry::EntryRecord {
@@ -69,7 +69,7 @@ mod db_tests {
     #[test]
     fn disk_size() {
         let db_path = temp_db_path("stats");
-        let db = heft::db::HeftDb::open(&db_path).unwrap();
+        let db = heft::db::HeftDb::open(&db_path, 1).unwrap();
 
         db.put_root("/test").unwrap();
         let entries = heft::entry::encode_many(&[heft::entry::EntryRecord {
@@ -106,7 +106,7 @@ mod tree_tests {
     ///     └── photo.jpg        (apparent=3000, actual=4096, mtime=300)
     fn setup_test_tree(name: &str) -> (PathBuf, heft::db::HeftDb) {
         let db_path = temp_db_path(name);
-        let db = heft::db::HeftDb::open(&db_path).unwrap();
+        let db = heft::db::HeftDb::open(&db_path, 1).unwrap();
 
         db.put_root("/root").unwrap();
 
@@ -255,7 +255,7 @@ mod tree_tests {
     #[test]
     fn empty_directory_produces_leaf_node() {
         let db_path = temp_db_path("tree-empty");
-        let db = heft::db::HeftDb::open(&db_path).unwrap();
+        let db = heft::db::HeftDb::open(&db_path, 1).unwrap();
 
         db.put_root("/empty").unwrap();
         // No entries written for /empty — it's an empty directory.

@@ -40,6 +40,7 @@ heft json --compress zstd --output tree.json.zst
 | Flag | Description |
 |------|-------------|
 | `-d, --database <path>` | Database path (default: `~/.heft.db`) |
+| `--map-size-gib <n>` | LMDB map size in GiB (default: 4) |
 | `--threads <n>` | Worker thread count (default: all cores) |
 | `--one-file-system` | Don't cross mount boundaries |
 | `--exclude <pattern>` | Exclude paths containing `<pattern>` |
