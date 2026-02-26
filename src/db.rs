@@ -23,7 +23,7 @@ impl HeftDb {
 
         let env = unsafe {
             let mut opts = EnvOpenOptions::new();
-            opts.map_size((map_size_gib as usize) * 1024 * 1024 * 1024);
+            opts.map_size((map_size_gib as usize).saturating_mul(1024 * 1024 * 1024));
             opts.max_dbs(1);
             // WRITE_MAP: use a writable mmap, faster than default write-through.
             // MAP_ASYNC: don't flush pages to disk synchronously on commit.

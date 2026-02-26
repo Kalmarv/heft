@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 /// Create a unique temp directory for each test's LMDB database.
 fn temp_db_path(name: &str) -> PathBuf {
-    let path = std::env::temp_dir().join(format!("dux-test-{}-{}", name, std::process::id()));
+    let path = std::env::temp_dir().join(format!("heft-test-{}-{}", name, std::process::id()));
     let _ = fs::remove_dir_all(&path);
     path
 }
