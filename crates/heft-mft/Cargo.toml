@@ -10,4 +10,13 @@ repository = "https://github.com/KalmarvAI/heft"
 [dependencies]
 heft-format = { path = "../heft-format" }
 clap = { version = "4", features = ["derive"] }
-# ntfs = "0.4"  # future: for MFT reading
+ntfs = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_UI_Controls_Dialogs",
+    "Win32_UI_Shell",
+] }

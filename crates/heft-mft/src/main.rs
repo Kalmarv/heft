@@ -1,14 +1,20 @@
+use std::path::PathBuf;
 use std::process;
 
 use clap::{Parser, Subcommand};
 use heft_format::display::{format_count, format_size};
 use heft_format::pack;
 
+mod mft;
+mod volume;
+#[cfg_attr(not(windows), allow(dead_code))]
+mod windows;
+
 #[derive(Parser)]
 #[command(name = "heft-mft", about = "Windows MFT-based disk usage scanner")]
 struct Cli {
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Subcommand)]
@@ -20,13 +26,13 @@ enum Command {
 
         /// Output .heft file
         #[arg(short, long)]
-        output: Option<std::path::PathBuf>,
+        output: Option<PathBuf>,
     },
 
     /// List directory contents from a .heft file
     Ls {
         /// Path to the .heft file
-        file: std::path::PathBuf,
+        file: PathBuf,
 
         /// Directory path to list (default: root)
         path: Option<String>,
@@ -35,28 +41,82 @@ enum Command {
     /// Show metadata from a .heft file
     Info {
         /// Path to the .heft file
-        file: std::path::PathBuf,
+        file: PathBuf,
     },
 }
 
 fn main() {
     let cli = Cli::parse();
 
-    if let Err(e) = run(cli) {
-        eprintln!("heft-mft: error: {e}");
-        process::exit(1);
+    match cli.command {
+        // No subcommand (double-clicked on Windows) → auto mode.
+        None => {
+            #[cfg(windows)]
+            {
+                let result = auto_mode();
+                if let Err(e) = &result {
+                    eprintln!("heft-mft: error: {e}");
+                }
+                windows::wait_for_keypress();
+                if result.is_err() {
+                    process::exit(1);
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                eprintln!("No command specified. Run with --help for usage.");
+                process::exit(1);
+            }
+        }
+
+        Some(cmd) => {
+            if let Err(e) = run(cmd) {
+                eprintln!("heft-mft: error: {e}");
+                process::exit(1);
+            }
+        }
     }
 }
 
-fn run(cli: Cli) -> Result<(), heft_format::HeftError> {
-    match cli.command {
-        Command::Scan { volume, .. } => {
-            eprintln!(
-                "MFT scanning for volume '{}' is not yet implemented.\n\
-                 This feature requires Windows and the ntfs crate.",
-                volume
-            );
-            process::exit(2);
+/// Auto mode: detect OS drive, elevate if needed, scan, save dialog.
+#[cfg(windows)]
+fn auto_mode() -> Result<(), heft_format::HeftError> {
+    if !windows::is_elevated() {
+        eprintln!("Requesting Administrator privileges...");
+        if windows::elevate_self() {
+            // Elevated process launched — this one can exit.
+            process::exit(0);
+        } else {
+            return Err(heft_format::HeftError::Other(
+                "Administrator privileges are required to read the MFT".to_string(),
+            ));
+        }
+    }
+
+    let drive = volume::os_drive_letter();
+    let volume_spec = format!("{drive}:");
+    eprintln!("Scanning {volume_spec} ...");
+
+    let (tree, root_path) = mft::scan_volume(&volume_spec, true)?;
+
+    let default_name = format!("{drive}.heft");
+    let output_path = windows::save_file_dialog(&default_name).ok_or_else(|| {
+        heft_format::HeftError::Other("save cancelled".to_string())
+    })?;
+
+    pack::pack_tree(&tree, &root_path, &output_path)?;
+    Ok(())
+}
+
+fn run(cmd: Command) -> Result<(), heft_format::HeftError> {
+    match cmd {
+        Command::Scan { volume, output } => {
+            let (tree, root_path) = mft::scan_volume(&volume, false)?;
+            let output_path = output.unwrap_or_else(|| {
+                let base = root_path.trim_end_matches([':', '\\']);
+                PathBuf::from(format!("{base}.heft"))
+            });
+            pack::pack_tree(&tree, &root_path, &output_path)?;
         }
 
         Command::Ls { file, path } => {
@@ -87,13 +147,16 @@ fn run(cli: Cli) -> Result<(), heft_format::HeftError> {
     Ok(())
 }
 
+/// Navigate a TreeNode tree by path, handling both `/` and `\` separators.
 fn find_node<'a>(
     root: &'a heft_format::TreeNode,
     root_path: &str,
     target: &str,
 ) -> Result<&'a heft_format::TreeNode, heft_format::HeftError> {
+    // Normalize backslashes to forward slashes for Windows path compat.
+    let target_norm = target.replace('\\', "/");
     let root_trimmed = root_path.trim_end_matches('/');
-    let target_trimmed = target.trim_end_matches('/');
+    let target_trimmed = target_norm.trim_end_matches('/');
 
     if target_trimmed == root_trimmed || target_trimmed.is_empty() {
         return Ok(root);
