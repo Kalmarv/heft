@@ -1,15 +1,12 @@
-use std::fs::{self, File};
-use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::path::PathBuf;
 use std::process;
 
 use clap::Parser;
 
 use heft::cli::{Cli, Command};
 use heft::db::HeftDb;
-use heft::entry;
 use heft::error;
-use heft::export;
 use heft::pack;
 use heft::scanner::{self, format_count, format_size, ScanOptions};
 use heft::tree;
@@ -24,12 +21,12 @@ fn main() {
 }
 
 fn run(cli: Cli) -> error::Result<()> {
-    let db_path = cli.db_path.unwrap_or_else(HeftDb::default_path);
     let map_size_gib = cli.map_size_gib;
 
     match cli.command {
-        Command::Index {
+        Command::Scan {
             path,
+            output,
             verbose,
             threads,
             one_file_system,
@@ -52,129 +49,135 @@ fn run(cli: Cli) -> error::Result<()> {
                 }
             }
 
-            let db = HeftDb::open(&db_path, map_size_gib)?;
-            let opts = ScanOptions {
-                verbose,
-                threads,
-                one_file_system,
-                exclude: exclude_patterns,
-            };
-            scanner::run_index(&path, &db, &opts)?;
-        }
-
-        Command::Info { path } => {
-            if let Some(ref p) = path {
-                if is_heft_file(p) {
-                    let meta = pack::read_info(p)?;
-                    println!("File:    {}", p.display());
-                    println!("Root:    {}", meta.root);
-                    println!("Version: {}", meta.heft_version);
-                    println!(
-                        "Data:    {} files  {} dirs  {}",
-                        format_count(meta.file_count),
-                        format_count(meta.dir_count),
-                        format_size(meta.size_actual),
-                    );
-                    let file_size = std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
-                    println!("Packed:  {}", format_size(file_size));
-                    return Ok(());
-                }
-            }
-
-            let db = HeftDb::open(&db_path, map_size_gib)?;
-            let root = db.get_root()?;
-            let disk = db.disk_size()?;
-
-            if let Some(ref root_path) = root {
-                let rtxn = db.read_txn()?;
-                let agg = tree::aggregate_sizes(&db, &rtxn, root_path)?;
-                println!(
-                    "{}  {} files  {} dirs  {}",
-                    root_path,
-                    format_count(agg.file_count),
-                    format_count(agg.dir_count),
-                    format_size(agg.size_actual),
-                );
+            // Resolve the scan path to an absolute path.
+            let abs_path = std::path::absolute(&path).map_err(|e| {
+                error::HeftError::Other(format!("cannot resolve '{}': {e}", path.display()))
+            })?;
+            let root_str = abs_path.to_string_lossy().to_string();
+            let root_str = if root_str.len() > 1 {
+                root_str.trim_end_matches('/').to_string()
             } else {
-                println!("(no index — run `heft index <path>` first)");
-            }
-            println!("Database: {} ({})", db_path.display(), format_size(disk));
-        }
+                root_str
+            };
 
-        Command::Ls { path } => {
-            let db = HeftDb::open(&db_path, map_size_gib)?;
-            let dir_path = resolve_path(&db, path)?;
-            run_ls(&db, &dir_path)?;
-        }
-
-        Command::Json {
-            path,
-            compress,
-            output,
-        } => {
-            let db = HeftDb::open(&db_path, map_size_gib)?;
-            let root_path = resolve_path(&db, path)?;
-            export::run_export(
-                &db,
-                &root_path,
-                compress.as_deref(),
-                output.as_deref(),
-            )?;
-        }
-
-        Command::Pack { path, output } => {
-            let db = HeftDb::open(&db_path, map_size_gib)?;
-            let root_path = resolve_path(&db, path)?;
-
+            // Derive output path: -o flag or <basename>.heft in cwd.
             let output_path = output.unwrap_or_else(|| {
-                let basename = std::path::Path::new(&root_path)
+                let basename = std::path::Path::new(&root_str)
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| "root".to_string());
                 PathBuf::from(format!("{basename}.heft"))
             });
 
-            pack::run_pack(&db, &root_path, &output_path)?;
+            // Create a transient LMDB in a tempdir.
+            let tmpdir = tempfile::TempDir::new().map_err(|e| {
+                error::HeftError::Other(format!("cannot create temp directory: {e}"))
+            })?;
+
+            let db = HeftDb::open(tmpdir.path(), map_size_gib)?;
+            let opts = ScanOptions {
+                verbose,
+                threads,
+                one_file_system,
+                exclude: exclude_patterns,
+            };
+            scanner::run_index(&abs_path, &db, &opts)?;
+
+            // Build tree from DB, then close DB before packing.
+            let t = tree::build_tree(&db, &root_str)?;
+            drop(db);
+
+            pack::pack_tree(&t, &root_str, &output_path)?;
+            // tmpdir auto-cleans on drop
         }
 
-        Command::Unpack { input } => {
-            pack::run_unpack(&input, &db_path, map_size_gib)?;
+        Command::Ls { file, path } => {
+            let (meta, t) = pack::load_tree(&file)?;
+            let node = match &path {
+                Some(p) => find_node(&t, &meta.root, p)?,
+                None => &t,
+            };
+            run_ls(node)?;
+        }
+
+        Command::Info { file } => {
+            let meta = pack::read_info(&file)?;
+            println!("File:    {}", file.display());
+            println!("Root:    {}", meta.root);
+            println!("Version: {}", meta.heft_version);
+            println!(
+                "Data:    {} files  {} dirs  {}",
+                format_count(meta.file_count),
+                format_count(meta.dir_count),
+                format_size(meta.size_actual),
+            );
+            let file_size = std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
+            println!("Packed:  {}", format_size(file_size));
         }
     }
 
     Ok(())
 }
 
-/// Resolve a user-provided path, or fall back to the indexed root.
+// ── Tree navigation ─────────────────────────────────────────────────────
+
+/// Navigate the tree to find the node at `target_path`.
 ///
-/// Uses `std::path::absolute` instead of `fs::canonicalize` so that symlinks
-/// are not followed (avoiding key mismatches) and the path need not exist on disk.
-fn resolve_path(db: &HeftDb, path: Option<PathBuf>) -> error::Result<String> {
-    match path {
-        Some(p) => {
-            let abs = std::path::absolute(&p).map_err(|e| {
-                error::HeftError::Other(format!("cannot resolve '{}': {e}", p.display()))
-            })?;
-            let s = abs.to_string_lossy().to_string();
-            // Strip trailing slash so DB keys match (except for root "/").
-            if s.len() > 1 { Ok(s.trim_end_matches('/').to_string()) } else { Ok(s) }
-        }
-        None => db.get_root()?.ok_or_else(|| {
-            error::HeftError::Other("no index found — run `heft index <path>` first".into())
-        }),
+/// Strips the root prefix from the target, then walks tree children
+/// matching each remaining path component.
+fn find_node<'a>(
+    root: &'a tree::TreeNode,
+    root_path: &str,
+    target: &str,
+) -> error::Result<&'a tree::TreeNode> {
+    let root_trimmed = root_path.trim_end_matches('/');
+    let target_trimmed = target.trim_end_matches('/');
+
+    // If the target is the root itself, return the root node.
+    if target_trimmed == root_trimmed || target_trimmed.is_empty() {
+        return Ok(root);
     }
+
+    // Strip the root prefix to get the relative path.
+    let relative = if let Some(rest) = target_trimmed.strip_prefix(root_trimmed) {
+        rest.trim_start_matches('/')
+    } else {
+        // Target doesn't start with root — treat it as a relative path.
+        target_trimmed.trim_start_matches('/')
+    };
+
+    if relative.is_empty() {
+        return Ok(root);
+    }
+
+    let mut current = root;
+    for component in relative.split('/') {
+        if component.is_empty() {
+            continue;
+        }
+        let children = current.children.as_ref().ok_or_else(|| {
+            error::HeftError::Other(format!("not a directory: {}", current.name))
+        })?;
+        current = children
+            .iter()
+            .find(|c| c.name == component)
+            .ok_or_else(|| {
+                error::HeftError::Other(format!("path not found: {target}"))
+            })?;
+    }
+
+    Ok(current)
 }
 
-/// Display a directory listing with human-readable sizes.
-fn run_ls(db: &HeftDb, dir_path: &str) -> error::Result<()> {
-    // Single read transaction for the entire ls operation.
-    let rtxn = db.read_txn()?;
+// ── Listing ─────────────────────────────────────────────────────────────
 
-    let entries = db.get_dir_in_txn(&rtxn, dir_path)?.ok_or_else(|| {
-        error::HeftError::Other(format!("directory not found in database: {dir_path}"))
+/// Display a directory listing from a TreeNode.
+fn run_ls(node: &tree::TreeNode) -> error::Result<()> {
+    let children = node.children.as_ref().ok_or_else(|| {
+        error::HeftError::Other(format!("'{}' is a file, not a directory", node.name))
     })?;
 
-    if entries.is_empty() {
+    if children.is_empty() {
         println!("(empty directory)");
         return Ok(());
     }
@@ -186,32 +189,18 @@ fn run_ls(db: &HeftDb, dir_path: &str) -> error::Result<()> {
         mtime: u64,
     }
 
-    let mut rows: Vec<Row> = Vec::with_capacity(entries.len());
-    for e in &entries {
-        let suffix = match e.entry_type {
-            entry::EntryType::Dir => "/",
-            entry::EntryType::Symlink => "@",
-            _ => "",
-        };
-
-        // Use lightweight aggregate for dirs — no TreeNode allocation.
-        let (apparent, actual) = if e.entry_type == entry::EntryType::Dir {
-            let child_path = format!("{}/{}", dir_path.trim_end_matches('/'), e.name);
-            match tree::aggregate_sizes(db, &rtxn, &child_path) {
-                Ok(agg) => (agg.size_apparent, agg.size_actual),
-                Err(_) => (e.size_apparent, e.size_actual),
+    let mut rows: Vec<Row> = children
+        .iter()
+        .map(|child| {
+            let suffix = if child.children.is_some() { "/" } else { "" };
+            Row {
+                name: format!("{}{}", child.name, suffix),
+                apparent: child.size_apparent,
+                actual: child.size_actual,
+                mtime: child.mtime,
             }
-        } else {
-            (e.size_apparent, e.size_actual)
-        };
-
-        rows.push(Row {
-            name: format!("{}{}", e.name, suffix),
-            apparent,
-            actual,
-            mtime: e.mtime,
-        });
-    }
+        })
+        .collect();
 
     // Sort by actual size descending.
     rows.sort_unstable_by(|a, b| b.actual.cmp(&a.actual));
@@ -244,13 +233,11 @@ fn run_ls(db: &HeftDb, dir_path: &str) -> error::Result<()> {
 }
 
 fn format_mtime(epoch_secs: u64) -> String {
-    // All math in u64 (input is non-negative), only narrowing to i64 for days_to_ymd.
     let days = epoch_secs / 86400;
     let time_of_day = epoch_secs % 86400;
     let hours = time_of_day / 3600;
     let minutes = (time_of_day % 3600) / 60;
 
-    // Clamp to i64 range to prevent wrap on corrupt/huge timestamps.
     let days_i64 = days.min(i64::MAX as u64) as i64;
     let (year, month, day) = days_to_ymd(days_i64);
     format!("{year:04}-{month:02}-{day:02} {hours:02}:{minutes:02}Z")
@@ -269,13 +256,4 @@ fn days_to_ymd(mut days: i64) -> (i64, i64, i64) {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
     (y, m, d)
-}
-
-/// Detect a .heft file by reading its magic bytes.
-fn is_heft_file(path: &Path) -> bool {
-    let Ok(mut f) = File::open(path) else {
-        return false;
-    };
-    let mut buf = [0u8; 5];
-    f.read_exact(&mut buf).is_ok() && &buf == b"HEFT\x01"
 }

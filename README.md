@@ -1,8 +1,8 @@
 # heft
 
-Fast disk usage scanner with mtime tracking. Indexes a directory tree into an LMDB database, then queries it instantly.
+Fast disk usage scanner with mtime tracking. Scans a directory tree and produces a portable `.heft` file that can be queried instantly.
 
-Similar to [duc](https://duc.zevv.nl/), but faster — heft parallelizes filesystem stat calls across a thread pool and writes results in batched LMDB transactions.
+Similar to [duc](https://duc.zevv.nl/), but faster — heft parallelizes filesystem stat calls across a thread pool and writes results in batched transactions.
 
 ## Install
 
@@ -13,61 +13,46 @@ cargo install heft
 ## Usage
 
 ```bash
-# Index a directory
-heft index /home/user
+# Scan a directory → produce a .heft file
+heft scan /home/user
+heft scan /home/user -o myserver.heft
 
-# Index without crossing filesystem boundaries
-heft index / --one-file-system
+# Scan without crossing filesystem boundaries
+heft scan / --one-file-system
 
 # Exclude paths
-heft index /home --exclude .cache --exclude target
-heft index /home --exclude-from patterns.txt
+heft scan /home --exclude .cache --exclude target
+heft scan /home --exclude-from patterns.txt
 
-# Show summary
-heft info
+# List contents (sorted by size, largest first)
+heft ls home.heft
+heft ls home.heft /home/user/Documents
 
-# List a directory (sorted by size, largest first)
-heft ls
-heft ls /home/user/Documents
-
-# Export as JSON
-heft json
-heft json --compress zstd --output tree.json.zst
-
-# Pack database into a portable .heft file
-heft pack
-heft pack -o myserver.heft
-
-# Unpack a .heft file into the database
-heft unpack myserver.heft
-
-# Inspect a packed file
-heft info myserver.heft
+# Show metadata
+heft info home.heft
 ```
 
 ## Options
 
 | Flag | Description |
 |------|-------------|
-| `-d, --database <path>` | Database path (default: `~/.heft.db`) |
-| `--map-size-gib <n>` | LMDB map size in GiB (default: 4) |
 | `--threads <n>` | Worker thread count (default: all cores) |
 | `--one-file-system` | Don't cross mount boundaries |
 | `--exclude <pattern>` | Exclude paths containing `<pattern>` |
 | `--exclude-from <file>` | Read exclude patterns from file |
 | `-v, --verbose` | Print each file as it's scanned |
-| `-o, --output <file>` | Output file for `pack` and `json` |
+| `-o, --output <file>` | Output file for `scan` (default: `<basename>.heft`) |
 
-## Database
+## .heft files
 
-heft stores results in LMDB at `~/.heft.db`. The database is always re-generable via `heft index`, so it uses `WRITE_MAP` + `MAP_ASYNC` flags for speed (no fsync). Override the path with `-d`.
+heft produces a single portable `.heft` file per scan. The file contains a zstd-compressed JSON tree with file sizes, mtimes, and directory structure. It can be shared, emailed, or inspected without any database.
 
-Re-indexing a path only replaces data under that path — if you index `/home` and then `/var`, both coexist in the database. Timestamps are displayed in UTC.
+Internally, heft uses a transient LMDB database during scanning (created in a temporary directory, cleaned up automatically). The database is never exposed to the user.
 
 ## Notes
 
-- **Network filesystems:** LMDB requires POSIX `fcntl` locking and coherent `mmap`. CIFS, NFS, and other network mounts do not provide these guarantees — store the database on a local filesystem.
-- **Database file size:** LMDB pre-allocates a sparse file sized to `--map-size-gib` (default 4 GiB). The file appears large via `ls -l` but actual disk usage is much smaller — use `du` or `heft info` to see the real size.
+- **Default output**: `heft scan /home` → `home.heft`; `heft scan /` → `root.heft`
+- **Timestamps** are displayed in UTC.
 
 ## AI Disclaimer
 

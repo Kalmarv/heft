@@ -463,7 +463,7 @@ mod tree_tests {
         assert_eq!(tree.size_apparent, 0);
         assert_eq!(tree.size_actual, 0);
         assert_eq!(tree.count, 1); // just the dir itself
-        assert!(tree.children.is_none());
+        assert!(tree.children.as_ref().unwrap().is_empty());
 
         cleanup(&db_path);
     }

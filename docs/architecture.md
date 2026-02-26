@@ -2,9 +2,9 @@
 
 ## Overview
 
-heft has two phases: **index** (walk filesystem, write to DB) and **query** (read DB, display results).
+heft has two phases: **scan** (walk filesystem → produce .heft file) and **query** (read .heft file, display results).
 
-## Indexing pipeline
+## Scan pipeline
 
 ```
 Worker threads (rayon)              Main thread
@@ -22,29 +22,28 @@ Worker threads (rayon)              Main thread
 
 1. **jwalk** walks the directory tree using a rayon thread pool. For each directory it reads, it calls our `process_read_dir` callback on a worker thread.
 2. The **callback** iterates the directory's children, calls `symlink_metadata()` on each, encodes all entries into a compact binary blob, and sends a `DirBatch` over a bounded crossbeam channel.
-3. The **main thread** receives batches and writes them to LMDB. It commits the write transaction every 1,000 directories.
-4. A separate **driver thread** iterates the walker to completion (its return values are discarded — the callback does the real work).
+3. The **main thread** receives batches and writes them to a transient LMDB database (created in a temporary directory).
+4. After scanning completes, `build_tree` reads the LMDB and constructs an in-memory `TreeNode` tree. The tree is then packed into a `.heft` file via `pack_tree`. The temporary LMDB is cleaned up automatically.
 
 ## Modules
 
 | Module | Purpose |
 |--------|---------|
-| `cli.rs` | Clap argument definitions |
+| `cli.rs` | Clap argument definitions (scan, ls, info) |
 | `scanner.rs` | Indexing pipeline (walker + channel + DB writer) |
 | `db.rs` | LMDB wrapper (open, read, write, clear) |
 | `entry.rs` | Binary encoding/decoding of filesystem entries (LEB128) |
 | `tree.rs` | Recursive aggregation for query (build tree, compute sizes) |
-| `export.rs` | JSON export with optional compression |
-| `pack.rs` | Pack/unpack portable .heft files |
+| `pack.rs` | Pack/load portable .heft files |
 | `error.rs` | Error types |
 
 ## Database layout
 
-LMDB with a single `dirs` database. Keys are absolute directory paths (UTF-8 strings), values are packed binary blobs.
+LMDB is used internally during scanning as a transient store. Keys are absolute directory paths (UTF-8 strings), values are packed binary blobs.
 
 | Key | Value |
 |-----|-------|
-| `\x00__heft_root__` | Sentinel: which path was indexed |
+| `\x00__heft_root__` | Sentinel: which path was scanned |
 | `/home/user` | Encoded entries for that directory's children |
 | `/home/user/docs` | Encoded entries for docs/ children |
 
@@ -69,15 +68,17 @@ This format is append-friendly: concatenating two encoded blobs is the same as d
 
 **Channel bound of 256** — prevents unbounded memory growth if the LMDB writer is slower than the walkers. At ~1.5 KB per batch, this caps buffering at ~400 KB.
 
-**WRITE_MAP + MAP_ASYNC** — LMDB writes go directly to an mmap'd region without copying, and pages aren't fsynced on commit. Safe here because the database is always re-generable.
+**WRITE_MAP + MAP_ASYNC** — LMDB writes go directly to an mmap'd region without copying, and pages aren't fsynced on commit. Safe here because the database is transient and always re-generable.
 
 **One stat call per entry** — the callback calls `symlink_metadata()` once per child and extracts file type, size, mtime, device, and block count from the same result.
+
+**Transient LMDB** — the database exists only during `heft scan`, in a temporary directory. This keeps the user experience simple (no `-d` flags, no leftover `.heft.db` directories) while preserving the high-performance batched-write pipeline.
 
 **main.rs imports from lib crate** — `use heft::db` instead of `mod db`. This avoids compiling every module twice (once for lib, once for bin) and ensures the compiler sees cross-crate usage of public methods.
 
 ## Packed format (.heft)
 
-A `.heft` file is a single portable file containing a complete directory tree snapshot. It can be shared, emailed, or dragged into a treemap visualizer without requiring LMDB.
+A `.heft` file is the only user-facing artifact. It contains a complete directory tree snapshot that can be shared, emailed, or queried with `heft ls` and `heft info`.
 
 ### Binary layout
 
@@ -97,7 +98,7 @@ Offset  Size      Description
 {
   "root": "/home",
   "timestamp": 1740000000,
-  "heft_version": "0.1.7",
+  "heft_version": "0.2.0",
   "file_count": 258423,
   "dir_count": 70713,
   "size_actual": 82899398656
@@ -112,7 +113,3 @@ Consumers can read the first 9 + N bytes to extract metadata without decompressi
 - **Separate metadata** — cheap to read without decompressing the tree (useful for file browsers, info commands).
 - **Zstd compression** — level 3 gives ~20:1 compression on the JSON tree with fast decompression.
 - **Compact JSON** — `to_writer` (not `to_writer_pretty`) saves ~30% on pre-compression size.
-
-### Round-tripping
-
-`heft pack` builds the in-memory `TreeNode` tree from LMDB, serializes it as zstd-compressed JSON, and writes the `.heft` file. `heft unpack` reverses this: it deserializes the tree and reconstructs the LMDB entries by walking each directory node and encoding its children as `EntryRecord`s.

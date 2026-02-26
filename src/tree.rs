@@ -84,11 +84,7 @@ fn build_node(
         size_actual,
         mtime,
         count,
-        children: if children.is_empty() {
-            None
-        } else {
-            Some(children)
-        },
+        children: Some(children),
     })
 }
 

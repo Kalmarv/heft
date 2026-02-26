@@ -4,12 +4,8 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(name = "heft", about = "Fast disk usage scanner with mtime tracking")]
 pub struct Cli {
-    /// Path to the LMDB database (default: ~/.heft.db)
-    #[arg(short = 'd', long = "database", global = true)]
-    pub db_path: Option<PathBuf>,
-
-    /// LMDB map size in GiB (default: 4)
-    #[arg(long, global = true, default_value_t = 4)]
+    /// LMDB map size in GiB (advanced, default: 4)
+    #[arg(long, global = true, default_value_t = 4, hide = true)]
     pub map_size_gib: u64,
 
     #[command(subcommand)]
@@ -18,10 +14,14 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Scan a directory and index it into the database
-    Index {
+    /// Scan a directory and produce a .heft file
+    Scan {
         /// Root directory to scan
         path: PathBuf,
+
+        /// Output file (default: <basename>.heft in cwd)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
 
         /// Print every file path as it's scanned
         #[arg(short, long)]
@@ -44,45 +44,18 @@ pub enum Command {
         exclude_from: Option<PathBuf>,
     },
 
-    /// Show database statistics (or inspect a .heft file)
-    Info {
-        /// Path to a .heft file (default: show database stats)
-        path: Option<PathBuf>,
-    },
-
-    /// List contents of a directory from the database
+    /// List directory contents from a .heft file
     Ls {
-        /// Directory path to list (default: indexed root)
-        path: Option<PathBuf>,
+        /// Path to the .heft file
+        file: PathBuf,
+
+        /// Directory path to list (default: root)
+        path: Option<String>,
     },
 
-    /// Export directory tree as JSON
-    Json {
-        /// Root path to export (default: indexed root)
-        path: Option<PathBuf>,
-
-        /// Compression method
-        #[arg(long, value_parser = ["gzip", "zstd"])]
-        compress: Option<String>,
-
-        /// Output file (default: stdout)
-        #[arg(short, long)]
-        output: Option<PathBuf>,
-    },
-
-    /// Pack the database into a portable .heft file
-    Pack {
-        /// Root path to pack (default: indexed root)
-        path: Option<PathBuf>,
-
-        /// Output file (default: <root-basename>.heft)
-        #[arg(short, long)]
-        output: Option<PathBuf>,
-    },
-
-    /// Unpack a .heft file into the database
-    Unpack {
-        /// Input .heft file
-        input: PathBuf,
+    /// Show metadata from a .heft file
+    Info {
+        /// Path to the .heft file
+        file: PathBuf,
     },
 }
