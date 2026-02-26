@@ -116,7 +116,9 @@ fn resolve_path(db: &HeftDb, path: Option<PathBuf>) -> error::Result<String> {
             let abs = std::path::absolute(&p).map_err(|e| {
                 error::HeftError::Other(format!("cannot resolve '{}': {e}", p.display()))
             })?;
-            Ok(abs.to_string_lossy().to_string())
+            let s = abs.to_string_lossy().to_string();
+            // Strip trailing slash so DB keys match (except for root "/").
+            if s.len() > 1 { Ok(s.trim_end_matches('/').to_string()) } else { Ok(s) }
         }
         None => db.get_root()?.ok_or_else(|| {
             error::HeftError::Other("no index found — run `heft index <path>` first".into())
