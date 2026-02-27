@@ -134,10 +134,11 @@ fn run(cmd: Command) -> Result<(), heft_format::HeftError> {
             println!("Root:    {}", meta.root);
             println!("Version: {}", meta.heft_version);
             println!(
-                "Data:    {} files  {} dirs  {}",
+                "Data:    {} files  {} dirs  {} ({} bytes)",
                 format_count(meta.file_count),
                 format_count(meta.dir_count),
                 format_size(meta.size_actual),
+                meta.size_actual,
             );
             let file_size = std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
             println!("Packed:  {}", format_size(file_size));

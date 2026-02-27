@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
+default-members = ["crates/heft-format", "crates/heft-mft"]
 
 [profile.release]
 debug = true

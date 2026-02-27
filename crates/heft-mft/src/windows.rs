@@ -9,8 +9,8 @@ use std::path::PathBuf;
 #[cfg(windows)]
 use windows_sys::Win32::{
     Foundation::CloseHandle,
-    Security::{GetTokenInformation, OpenProcessToken, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY},
-    System::Threading::GetCurrentProcess,
+    Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY},
+    System::Threading::{GetCurrentProcess, OpenProcessToken},
     UI::{
         Controls::Dialogs::{
             GetSaveFileNameW, OPENFILENAMEW, OFN_OVERWRITEPROMPT, OFN_PATHMUSTEXIST,
