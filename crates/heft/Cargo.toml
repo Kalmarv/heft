@@ -1,6 +1,6 @@
 [package]
 name = "heft"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 rust-version = "1.79"
 description = "Fast disk usage scanner with mtime tracking"
@@ -10,7 +10,7 @@ keywords = ["disk-usage", "du", "filesystem", "lmdb"]
 categories = ["command-line-utilities", "filesystem"]
 
 [dependencies]
-heft-format = { path = "../heft-format" }
+heft-format = { version = "0.2.1", path = "../heft-format" }
 clap = { version = "4", features = ["derive"] }
 jwalk = "0.8"
 heed = "0.20"
