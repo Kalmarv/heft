@@ -510,7 +510,7 @@ dependencies = [
 
 [[package]]
 name = "heft"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "clap",
  "criterion",
@@ -525,7 +525,7 @@ dependencies = [
 
 [[package]]
 name = "heft-format"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -534,7 +534,7 @@ dependencies = [
 
 [[package]]
 name = "heft-mft"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "clap",
  "heft-format",

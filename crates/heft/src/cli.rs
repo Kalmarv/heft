@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "heft", about = "Fast disk usage scanner with mtime tracking")]
+#[command(name = "heft", about = "Fast disk usage scanner with mtime tracking", version)]
 pub struct Cli {
     /// LMDB map size in GiB (advanced, default: 4)
     #[arg(long, global = true, default_value_t = 4, hide = true)]
