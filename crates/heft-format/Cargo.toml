@@ -1,6 +1,6 @@
 [package]
 name = "heft-format"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.79"
 description = "Shared .heft file format library (cross-platform)"
