@@ -27,6 +27,9 @@ mod db_tests {
                     mtime: 1,
                     size_apparent: 100,
                     size_actual: 4096,
+                    nlink: 1,
+                    dev: 0,
+                    ino: 0,
                     name: name.to_string(),
                 })
                 .collect();
@@ -66,6 +69,9 @@ mod db_tests {
             mtime: 1,
             size_apparent: 1,
             size_actual: 1,
+            nlink: 1,
+            dev: 0,
+            ino: 0,
             name: "x".into(),
         }]);
         {
@@ -97,6 +103,9 @@ mod db_tests {
             mtime: 0,
             size_apparent: 0,
             size_actual: 4096,
+            nlink: 1,
+            dev: 0,
+            ino: 0,
             name: "sub".into(),
         }]);
         {
@@ -222,6 +231,9 @@ mod tree_tests {
                 mtime: 0,
                 size_apparent: 0,
                 size_actual: 0,
+                nlink: 1,
+                dev: 0,
+                ino: 0,
                 name: "docs".into(),
             },
             heft::entry::EntryRecord {
@@ -229,6 +241,9 @@ mod tree_tests {
                 mtime: 0,
                 size_apparent: 0,
                 size_actual: 0,
+                nlink: 1,
+                dev: 0,
+                ino: 0,
                 name: "src".into(),
             },
             heft::entry::EntryRecord {
@@ -236,6 +251,9 @@ mod tree_tests {
                 mtime: 300,
                 size_apparent: 3000,
                 size_actual: 4096,
+                nlink: 1,
+                dev: 0,
+                ino: 0,
                 name: "photo.jpg".into(),
             },
         ]);
@@ -247,6 +265,9 @@ mod tree_tests {
                 mtime: 500,
                 size_apparent: 100,
                 size_actual: 4096,
+                nlink: 1,
+                dev: 0,
+                ino: 0,
                 name: "readme.txt".into(),
             },
             heft::entry::EntryRecord {
@@ -254,6 +275,9 @@ mod tree_tests {
                 mtime: 600,
                 size_apparent: 50,
                 size_actual: 4096,
+                nlink: 1,
+                dev: 0,
+                ino: 0,
                 name: "notes.txt".into(),
             },
         ]);
@@ -264,6 +288,9 @@ mod tree_tests {
             mtime: 400,
             size_apparent: 200,
             size_actual: 4096,
+            nlink: 1,
+            dev: 0,
+            ino: 0,
             name: "main.rs".into(),
         }]);
 
@@ -372,6 +399,9 @@ mod tree_tests {
                 mtime: 0,
                 size_apparent: 0,
                 size_actual: 0,
+                nlink: 1,
+                dev: 0,
+                ino: 0,
                 name: "usr".into(),
             },
             heft::entry::EntryRecord {
@@ -379,6 +409,9 @@ mod tree_tests {
                 mtime: 0,
                 size_apparent: 0,
                 size_actual: 0,
+                nlink: 1,
+                dev: 0,
+                ino: 0,
                 name: "etc".into(),
             },
             heft::entry::EntryRecord {
@@ -386,6 +419,9 @@ mod tree_tests {
                 mtime: 100,
                 size_apparent: 8000,
                 size_actual: 8192,
+                nlink: 1,
+                dev: 0,
+                ino: 0,
                 name: "swap.img".into(),
             },
         ]);
@@ -397,6 +433,9 @@ mod tree_tests {
                 mtime: 0,
                 size_apparent: 0,
                 size_actual: 0,
+                nlink: 1,
+                dev: 0,
+                ino: 0,
                 name: "bin".into(),
             },
         ]);
@@ -407,6 +446,9 @@ mod tree_tests {
             mtime: 200,
             size_apparent: 500,
             size_actual: 4096,
+            nlink: 1,
+            dev: 0,
+            ino: 0,
             name: "ls".into(),
         }]);
 
@@ -416,6 +458,9 @@ mod tree_tests {
             mtime: 300,
             size_apparent: 100,
             size_actual: 4096,
+            nlink: 1,
+            dev: 0,
+            ino: 0,
             name: "hosts".into(),
         }]);
 

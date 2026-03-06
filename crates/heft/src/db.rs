@@ -58,6 +58,9 @@ impl HeftDb {
             mtime: 0,
             size_apparent: 0,
             size_actual: 0,
+            nlink: 1,
+            dev: 0,
+            ino: 0,
             name: root_path.to_string(),
         };
         let encoded = encode_many(&[sentinel]);

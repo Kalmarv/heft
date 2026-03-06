@@ -248,6 +248,9 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
                     mtime,
                     size_apparent,
                     size_actual,
+                    nlink: 1,
+                    dev: 0,
+                    ino: 0,
                     name,
                 });
             }
