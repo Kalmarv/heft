@@ -430,6 +430,9 @@ fn build_node(
             size_actual: 0,
             mtime: 0,
             count: 1,
+            nlink: 1,
+            dev: 0,
+            ino: 0,
             children: Some(Vec::new()),
         };
     }
@@ -471,6 +474,9 @@ fn build_node(
                             size_actual: child_entry.size_actual,
                             mtime: child_entry.mtime,
                             count: 1,
+                            nlink: 1,
+                            dev: 0,
+                            ino: 0,
                             children: None,
                         });
                     }
@@ -486,6 +492,9 @@ fn build_node(
                 size_actual: total_actual,
                 mtime: max_mtime,
                 count: total_count,
+                nlink: 1,
+                dev: 0,
+                ino: 0,
                 children: Some(child_nodes),
             }
         }
@@ -498,6 +507,9 @@ fn build_node(
                     size_actual: 0,
                     mtime: base_mtime,
                     count: 1,
+                    nlink: 1,
+                    dev: 0,
+                    ino: 0,
                     children: Some(Vec::new()),
                 }
             } else {
@@ -508,6 +520,9 @@ fn build_node(
                     size_actual: e.size_actual,
                     mtime: e.mtime,
                     count: 1,
+                    nlink: 1,
+                    dev: 0,
+                    ino: 0,
                     children: None,
                 }
             }

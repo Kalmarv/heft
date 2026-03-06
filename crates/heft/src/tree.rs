@@ -56,6 +56,9 @@ fn build_node(
                 size_actual: entry.size_actual,
                 mtime: entry.mtime,
                 count: 1,
+                nlink: entry.nlink,
+                dev: entry.dev,
+                ino: entry.ino,
                 children: None,
             });
         }
@@ -72,6 +75,9 @@ fn build_node(
         size_actual,
         mtime,
         count,
+        nlink: 1,
+        dev: 0,
+        ino: 0,
         children: Some(children),
     })
 }

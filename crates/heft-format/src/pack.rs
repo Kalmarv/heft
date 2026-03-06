@@ -10,7 +10,7 @@ use crate::error::{HeftError, Result};
 use crate::tree::TreeNode;
 
 /// Magic bytes identifying a .heft file, plus format version.
-const MAGIC: &[u8; 5] = b"HEFT\x01";
+const MAGIC: &[u8; 5] = b"HEFT\x02";
 
 /// Metadata stored in the .heft file header (readable without decompression).
 #[derive(Debug, Serialize, Deserialize)]
