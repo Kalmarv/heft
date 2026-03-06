@@ -243,14 +243,21 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
                     }
                 }
 
+                let nlink = metadata.nlink();
+                let (dev, ino) = if nlink > 1 {
+                    (metadata.dev(), metadata.ino())
+                } else {
+                    (0, 0)
+                };
+
                 entries.push(EntryRecord {
                     entry_type,
                     mtime,
                     size_apparent,
                     size_actual,
-                    nlink: 1,
-                    dev: 0,
-                    ino: 0,
+                    nlink,
+                    dev,
+                    ino,
                     name,
                 });
             }
