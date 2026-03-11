@@ -56,9 +56,15 @@ entry_type    (1 byte: 0=File, 1=Dir, 2=Symlink, 3=Other)
 mtime         (LEB128 varint)
 size_apparent (LEB128 varint)
 size_actual   (LEB128 varint)
+nlink         (LEB128 varint)
+[if nlink > 1]:
+  dev         (LEB128 varint)
+  ino         (LEB128 varint)
 name_len      (LEB128 varint)
 name_bytes    (UTF-8, name_len bytes)
 ```
+
+The `nlink` field stores the hard link count. When `nlink > 1`, the device ID (`dev`) and inode number (`ino`) follow, allowing readers to identify and deduplicate hardlinked files. For non-hardlinked files (`nlink = 1`), `dev` and `ino` are omitted — costing only 1 extra byte per entry.
 
 This format is append-friendly: concatenating two encoded blobs is the same as decoding both, merging, and re-encoding.
 
@@ -86,7 +92,7 @@ A `.heft` file is the only user-facing artifact. It contains a complete director
 Offset  Size      Description
 ──────  ────      ───────────
 0       4 bytes   Magic: "HEFT"
-4       1 byte    Format version (0x01)
+4       1 byte    Format version (0x02)
 5       4 bytes   Metadata JSON length (u32 LE)
 9       N bytes   Metadata JSON (UTF-8)
 9+N     rest      Zstd-compressed tree JSON (compact, not pretty-printed)
@@ -98,7 +104,7 @@ Offset  Size      Description
 {
   "root": "/home",
   "timestamp": 1740000000,
-  "heft_version": "0.2.0",
+  "heft_version": "0.3.1",
   "file_count": 258423,
   "dir_count": 70713,
   "size_actual": 82899398656
@@ -107,9 +113,19 @@ Offset  Size      Description
 
 Consumers can read the first 9 + N bytes to extract metadata without decompressing the tree payload.
 
+### Tree JSON
+
+The compressed tree is a recursive `TreeNode` structure. Hardlink fields are conditionally serialized to keep the JSON compact:
+
+- `nlink` — omitted when `<= 1` (most files)
+- `dev`, `ino` — omitted when `0`
+
+Old `.heft` files (format v1) lack hardlink data and are rejected with a clear error. Re-scan to produce a v2 file.
+
 ### Rationale
 
 - **Magic bytes** — allow `heft info` and other tools to identify the file format by content, not just extension.
 - **Separate metadata** — cheap to read without decompressing the tree (useful for file browsers, info commands).
 - **Zstd compression** — level 3 gives ~20:1 compression on the JSON tree with fast decompression.
 - **Compact JSON** — `to_writer` (not `to_writer_pretty`) saves ~30% on pre-compression size.
+- **Conditional hardlink fields** — `dev`/`ino` only appear when `nlink > 1`, keeping the common case (no hardlinks) at zero JSON overhead.

@@ -49,9 +49,15 @@ heft info home.heft
 
 ## .heft files
 
-heft produces a single portable `.heft` file per scan. The file contains a zstd-compressed JSON tree with file sizes, mtimes, and directory structure. It can be shared, emailed, or inspected without any database.
+heft produces a single portable `.heft` file per scan. The file contains a zstd-compressed JSON tree with file sizes, mtimes, hardlink metadata, and directory structure. It can be shared, emailed, or inspected without any database.
 
 Internally, heft uses a transient LMDB database during scanning (created in a temporary directory, cleaned up automatically). The database is never exposed to the user.
+
+## Hardlink support
+
+heft stores hardlink metadata (`nlink`, `dev`, `ino`) for every entry. For non-hardlinked files, only `nlink` (1 byte) is stored. For hardlinked files (`nlink > 1`), the device ID and inode number are also recorded so downstream readers can deduplicate.
+
+heft itself is policy-free — it stores raw facts. Readers decide how to handle hardlinks (e.g. dedup with a `HashSet<(dev, ino)>`, annotate, or ignore).
 
 ## Notes
 
