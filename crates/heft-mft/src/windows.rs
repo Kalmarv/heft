@@ -1,7 +1,7 @@
-/// Win32 helpers for auto-mode: UAC elevation, save dialog, admin check.
-///
-/// All functions are #[cfg(windows)] — this module is only compiled on Windows.
-/// On Linux, main.rs uses #[cfg(not(windows))] branches instead.
+//! Win32 helpers for auto-mode: UAC elevation, save dialog, admin check.
+//!
+//! All functions are #[cfg(windows)] — this module is only compiled on Windows.
+//! On Linux, main.rs uses #[cfg(not(windows))] branches instead.
 
 #[cfg(windows)]
 use std::path::PathBuf;
