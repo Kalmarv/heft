@@ -3,5 +3,13 @@ resolver = "2"
 members = ["crates/*"]
 default-members = ["crates/heft-format", "crates/heft-mft"]
 
+[workspace.package]
+# one version for the repository: a release is its tag v<version> (CONTRIBUTING.md, Releasing)
+version = "0.3.1"
+
 [profile.release]
 debug = true
+
+# the profile dist builds the release downloads with
+[profile.dist]
+inherits = "release"

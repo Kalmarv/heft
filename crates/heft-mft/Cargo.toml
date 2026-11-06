@@ -1,6 +1,6 @@
 [package]
 name = "heft-mft"
-version = "0.3.1"
+version.workspace = true
 edition = "2021"
 rust-version = "1.79"
 description = "Windows MFT-based disk usage scanner that produces .heft files"
@@ -22,3 +22,8 @@ windows-sys = { version = "0.52", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[package.metadata.dist]
+# not on crates.io yet, but each release has its binary, for Windows
+dist = true
+targets = ["x86_64-pc-windows-msvc"]
