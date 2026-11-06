@@ -24,11 +24,7 @@ pub struct PackMeta {
 }
 
 /// Pack a pre-built tree into a portable `.heft` file.
-pub fn pack_tree(
-    tree: &TreeNode,
-    root_path: &str,
-    output: &Path,
-) -> Result<()> {
+pub fn pack_tree(tree: &TreeNode, root_path: &str, output: &Path) -> Result<()> {
     let (file_count, dir_count) = count_nodes(tree);
     let timestamp = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)

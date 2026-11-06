@@ -89,10 +89,7 @@ impl SectorReader {
         let offset_in_buf = (self.pos - aligned_start) as usize;
 
         // Already buffered?
-        if aligned_start == self.buf_start
-            && self.buf_len > 0
-            && offset_in_buf < self.buf_len
-        {
+        if aligned_start == self.buf_start && self.buf_len > 0 && offset_in_buf < self.buf_len {
             return Ok(Some(offset_in_buf));
         }
 

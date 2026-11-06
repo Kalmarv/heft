@@ -106,7 +106,11 @@ enum ParsedRecord {
     /// Base record — a complete file/directory entry.
     Base(MftEntry),
     /// Extension record — carries $DATA sizes for its base record.
-    Extension { base_record: u64, data_size: u64, alloc_size: u64 },
+    Extension {
+        base_record: u64,
+        data_size: u64,
+        alloc_size: u64,
+    },
 }
 
 /// Parse a single MFT record from a byte slice.
@@ -204,9 +208,9 @@ fn parse_mft_record(record_buf: &[u8]) -> Option<ParsedRecord> {
                                 .collect();
                             let name = String::from_utf16_lossy(&name_u16);
 
-                            let dominated = best
-                                .as_ref()
-                                .map_or(false, |b| ns_priority(b.namespace) >= ns_priority(namespace));
+                            let dominated = best.as_ref().map_or(false, |b| {
+                                ns_priority(b.namespace) >= ns_priority(namespace)
+                            });
                             if !dominated {
                                 best = Some(FileNameInfo {
                                     name,
@@ -229,22 +233,17 @@ fn parse_mft_record(record_buf: &[u8]) -> Option<ParsedRecord> {
                         alloc_size = data_size;
                     }
                 } else if pos + 0x38 <= limit {
-                    data_size = u64::from_le_bytes(
-                        rec[pos + 0x30..pos + 0x38].try_into().unwrap(),
-                    );
+                    data_size = u64::from_le_bytes(rec[pos + 0x30..pos + 0x38].try_into().unwrap());
                     // For compressed/sparse files, allocated_size (0x28) is the
                     // *virtual* allocation.  The actual on-disk size lives in
                     // compressed_size at offset 0x40 (present when compression_unit != 0).
-                    let compression_unit =
-                        u16::from_le_bytes([rec[pos + 0x22], rec[pos + 0x23]]);
+                    let compression_unit = u16::from_le_bytes([rec[pos + 0x22], rec[pos + 0x23]]);
                     if compression_unit != 0 && pos + 0x48 <= limit {
-                        alloc_size = u64::from_le_bytes(
-                            rec[pos + 0x40..pos + 0x48].try_into().unwrap(),
-                        );
+                        alloc_size =
+                            u64::from_le_bytes(rec[pos + 0x40..pos + 0x48].try_into().unwrap());
                     } else {
-                        alloc_size = u64::from_le_bytes(
-                            rec[pos + 0x28..pos + 0x30].try_into().unwrap(),
-                        );
+                        alloc_size =
+                            u64::from_le_bytes(rec[pos + 0x28..pos + 0x30].try_into().unwrap());
                     }
                 }
             }
@@ -257,7 +256,11 @@ fn parse_mft_record(record_buf: &[u8]) -> Option<ParsedRecord> {
     if is_extension {
         // Only worth returning if we found an unnamed $DATA with sizes.
         if data_size > 0 || alloc_size > 0 {
-            return Some(ParsedRecord::Extension { base_record, data_size, alloc_size });
+            return Some(ParsedRecord::Extension {
+                base_record,
+                data_size,
+                alloc_size,
+            });
         }
         return None;
     }
@@ -347,7 +350,11 @@ fn read_all_records<T: Read + Seek>(
                 Some(ParsedRecord::Base(entry)) => {
                     entries.insert(record_num, entry);
                 }
-                Some(ParsedRecord::Extension { base_record, data_size, alloc_size }) => {
+                Some(ParsedRecord::Extension {
+                    base_record,
+                    data_size,
+                    alloc_size,
+                }) => {
                     // Try to merge immediately (base record usually has a lower number).
                     if let Some(base) = entries.get_mut(&base_record) {
                         if base.size_apparent == 0 && base.size_actual == 0 && !base.is_directory {
@@ -367,9 +374,7 @@ fn read_all_records<T: Read + Seek>(
 
         if show_progress && last_progress.elapsed() >= progress_interval {
             let pct = (records_parsed as f64 / record_count as f64) * 100.0;
-            eprint!(
-                "\rReading MFT: {records_parsed}/{record_count} ({pct:.0}%)..."
-            );
+            eprint!("\rReading MFT: {records_parsed}/{record_count} ({pct:.0}%)...");
             let _ = std::io::stderr().flush();
             last_progress = Instant::now();
         }

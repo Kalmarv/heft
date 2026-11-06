@@ -32,14 +32,8 @@ fn create_test_tree(base: &Path) {
 }
 
 fn bench_index(c: &mut Criterion) {
-    let tree_dir = std::env::temp_dir().join(format!(
-        "heft-bench-tree-{}",
-        std::process::id()
-    ));
-    let db_path = std::env::temp_dir().join(format!(
-        "heft-bench-db-{}",
-        std::process::id()
-    ));
+    let tree_dir = std::env::temp_dir().join(format!("heft-bench-tree-{}", std::process::id()));
+    let db_path = std::env::temp_dir().join(format!("heft-bench-db-{}", std::process::id()));
 
     // Create the test tree once (outside the benchmark loop).
     let _ = fs::remove_dir_all(&tree_dir);

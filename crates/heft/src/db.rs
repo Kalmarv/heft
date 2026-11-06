@@ -168,5 +168,4 @@ impl HeftDb {
     pub fn disk_size(&self) -> Result<u64> {
         Ok(self.env.non_free_pages_size()?)
     }
-
 }

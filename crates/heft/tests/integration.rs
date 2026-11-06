@@ -129,12 +129,15 @@ mod db_tests {
         let db = heft::db::HeftDb::open(&db_path, 1).unwrap();
 
         // Populate two independent roots: /home and /var.
-        put_subtree(&db, &[
-            ("/home", &[("user", Dir)]),
-            ("/home/user", &[("file.txt", File)]),
-            ("/var", &[("log", Dir)]),
-            ("/var/log", &[("syslog", File)]),
-        ]);
+        put_subtree(
+            &db,
+            &[
+                ("/home", &[("user", Dir)]),
+                ("/home/user", &[("file.txt", File)]),
+                ("/var", &[("log", Dir)]),
+                ("/var/log", &[("syslog", File)]),
+            ],
+        );
 
         // Clear only /home.
         db.clear_subtree("/home").unwrap();
@@ -159,11 +162,14 @@ mod db_tests {
         let db_path = temp_db_path("clear-subtree-prefix");
         let db = heft::db::HeftDb::open(&db_path, 1).unwrap();
 
-        put_subtree(&db, &[
-            ("/home", &[("user", Dir)]),
-            ("/home/user", &[("file.txt", File)]),
-            ("/homelab", &[("server", Dir)]),
-        ]);
+        put_subtree(
+            &db,
+            &[
+                ("/home", &[("user", Dir)]),
+                ("/home/user", &[("file.txt", File)]),
+                ("/homelab", &[("server", Dir)]),
+            ],
+        );
 
         db.clear_subtree("/home").unwrap();
 
@@ -185,10 +191,13 @@ mod db_tests {
         let db = heft::db::HeftDb::open(&db_path, 1).unwrap();
 
         db.put_root("/").unwrap();
-        put_subtree(&db, &[
-            ("/", &[("usr", Dir), ("etc", Dir)]),
-            ("/usr", &[("bin", Dir)]),
-        ]);
+        put_subtree(
+            &db,
+            &[
+                ("/", &[("usr", Dir), ("etc", Dir)]),
+                ("/usr", &[("bin", Dir)]),
+            ],
+        );
 
         db.clear_subtree("/").unwrap();
 
@@ -296,9 +305,12 @@ mod tree_tests {
 
         {
             let mut wtxn = db.write_txn().unwrap();
-            db.put_dir_in_txn(&mut wtxn, "/root", &root_entries).unwrap();
-            db.put_dir_in_txn(&mut wtxn, "/root/docs", &docs_entries).unwrap();
-            db.put_dir_in_txn(&mut wtxn, "/root/src", &src_entries).unwrap();
+            db.put_dir_in_txn(&mut wtxn, "/root", &root_entries)
+                .unwrap();
+            db.put_dir_in_txn(&mut wtxn, "/root/docs", &docs_entries)
+                .unwrap();
+            db.put_dir_in_txn(&mut wtxn, "/root/src", &src_entries)
+                .unwrap();
             wtxn.commit().unwrap();
         }
 
@@ -335,8 +347,10 @@ mod tree_tests {
             assert!(
                 pair[0].size_actual >= pair[1].size_actual,
                 "children not sorted: {} ({}) before {} ({})",
-                pair[0].name, pair[0].size_actual,
-                pair[1].name, pair[1].size_actual
+                pair[0].name,
+                pair[0].size_actual,
+                pair[1].name,
+                pair[1].size_actual
             );
         }
 
@@ -427,18 +441,16 @@ mod tree_tests {
         ]);
 
         // /usr contains: bin/
-        let usr_entries = heft::entry::encode_many(&[
-            heft::entry::EntryRecord {
-                entry_type: heft::entry::EntryType::Dir,
-                mtime: 0,
-                size_apparent: 0,
-                size_actual: 0,
-                nlink: 1,
-                dev: 0,
-                ino: 0,
-                name: "bin".into(),
-            },
-        ]);
+        let usr_entries = heft::entry::encode_many(&[heft::entry::EntryRecord {
+            entry_type: heft::entry::EntryType::Dir,
+            mtime: 0,
+            size_apparent: 0,
+            size_actual: 0,
+            nlink: 1,
+            dev: 0,
+            ino: 0,
+            name: "bin".into(),
+        }]);
 
         // /usr/bin contains: ls
         let bin_entries = heft::entry::encode_many(&[heft::entry::EntryRecord {
@@ -468,7 +480,8 @@ mod tree_tests {
             let mut wtxn = db.write_txn().unwrap();
             db.put_dir_in_txn(&mut wtxn, "/", &root_entries).unwrap();
             db.put_dir_in_txn(&mut wtxn, "/usr", &usr_entries).unwrap();
-            db.put_dir_in_txn(&mut wtxn, "/usr/bin", &bin_entries).unwrap();
+            db.put_dir_in_txn(&mut wtxn, "/usr/bin", &bin_entries)
+                .unwrap();
             db.put_dir_in_txn(&mut wtxn, "/etc", &etc_entries).unwrap();
             wtxn.commit().unwrap();
         }

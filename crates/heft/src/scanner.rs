@@ -130,154 +130,163 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
             let firmlink_excludes = Arc::clone(&firmlink_excludes);
             let warned_devs = Arc::clone(&warned_devs);
             move |depth, path, _state, children| {
-            // depth == None means the virtual parent of root — skip.
-            let depth = match depth {
-                Some(d) => d,
-                None => return,
-            };
-            // At depth 0, path is the root itself. We stat its children.
-            let _ = depth;
-
-            let parent_str = path.to_string_lossy().to_string();
-            let exclude = &*exclude_patterns;
-
-            let mut entries = Vec::with_capacity(children.len());
-            let mut batch_file_count: u64 = 0;
-            let mut batch_dir_count: u64 = 0;
-            let mut batch_size_actual: u64 = 0;
-            let mut hardlinks: Vec<(u64, u64, u64)> = Vec::new();
-            let mut warnings: Vec<String> = Vec::new();
-            let mut verbose_lines: Vec<String> = Vec::new();
-
-            for child in children.iter_mut() {
-                let dir_entry = match child {
-                    Ok(ref mut e) => e,
-                    Err(_) => continue,
+                // depth == None means the virtual parent of root — skip.
+                let depth = match depth {
+                    Some(d) => d,
+                    None => return,
                 };
+                // At depth 0, path is the root itself. We stat its children.
+                let _ = depth;
 
-                let child_path = dir_entry.path();
+                let parent_str = path.to_string_lossy().to_string();
+                let exclude = &*exclude_patterns;
 
-                // Exclusion check.
-                if !exclude.is_empty() {
-                    let child_str = child_path.to_string_lossy();
-                    let excluded = exclude.iter().any(|pat| child_str.contains(pat.as_str()));
-                    if excluded {
-                        // Prevent descent into excluded directories.
+                let mut entries = Vec::with_capacity(children.len());
+                let mut batch_file_count: u64 = 0;
+                let mut batch_dir_count: u64 = 0;
+                let mut batch_size_actual: u64 = 0;
+                let mut hardlinks: Vec<(u64, u64, u64)> = Vec::new();
+                let mut warnings: Vec<String> = Vec::new();
+                let mut verbose_lines: Vec<String> = Vec::new();
+
+                for child in children.iter_mut() {
+                    let dir_entry = match child {
+                        Ok(ref mut e) => e,
+                        Err(_) => continue,
+                    };
+
+                    let child_path = dir_entry.path();
+
+                    // Exclusion check.
+                    if !exclude.is_empty() {
+                        let child_str = child_path.to_string_lossy();
+                        let excluded = exclude.iter().any(|pat| child_str.contains(pat.as_str()));
+                        if excluded {
+                            // Prevent descent into excluded directories.
+                            dir_entry.read_children_path = None;
+                            continue;
+                        }
+                    }
+
+                    // APFS firmlink dedup: skip Data-volume copies.
+                    if !firmlink_excludes.is_empty() {
+                        let child_str = child_path.to_string_lossy();
+                        if firmlink_excludes.contains(child_str.as_ref()) {
+                            dir_entry.read_children_path = None;
+                            continue;
+                        }
+                    }
+
+                    // Single stat call per entry.
+                    let metadata = match child_path.symlink_metadata() {
+                        Ok(m) => m,
+                        Err(e) => {
+                            warnings.push(format!("heft: warning: {}: {e}", child_path.display()));
+                            continue;
+                        }
+                    };
+
+                    // Cross-device check (one_file_system).
+                    if one_file_system && metadata.dev() != root_dev {
                         dir_entry.read_children_path = None;
                         continue;
                     }
-                }
 
-                // APFS firmlink dedup: skip Data-volume copies.
-                if !firmlink_excludes.is_empty() {
-                    let child_str = child_path.to_string_lossy();
-                    if firmlink_excludes.contains(child_str.as_ref()) {
-                        dir_entry.read_children_path = None;
-                        continue;
-                    }
-                }
+                    let ft = metadata.file_type();
+                    let entry_type = if ft.is_file() {
+                        EntryType::File
+                    } else if ft.is_dir() {
+                        EntryType::Dir
+                    } else if ft.is_symlink() {
+                        EntryType::Symlink
+                    } else {
+                        EntryType::Other
+                    };
 
-                // Single stat call per entry.
-                let metadata = match child_path.symlink_metadata() {
-                    Ok(m) => m,
-                    Err(e) => {
-                        warnings.push(format!("heft: warning: {}: {e}", child_path.display()));
-                        continue;
-                    }
-                };
-
-                // Cross-device check (one_file_system).
-                if one_file_system && metadata.dev() != root_dev {
-                    dir_entry.read_children_path = None;
-                    continue;
-                }
-
-                let ft = metadata.file_type();
-                let entry_type = if ft.is_file() {
-                    EntryType::File
-                } else if ft.is_dir() {
-                    EntryType::Dir
-                } else if ft.is_symlink() {
-                    EntryType::Symlink
-                } else {
-                    EntryType::Other
-                };
-
-                // Warn once per foreign filesystem when --one-file-system is off.
-                if !one_file_system
-                    && root_dev != 0
-                    && entry_type == EntryType::Dir
-                    && metadata.dev() != root_dev
-                {
-                    if warned_devs.lock().unwrap().insert(metadata.dev()) {
-                        warnings.push(format!(
-                            "heft: note: scanning into different filesystem at {} \
+                    // Warn once per foreign filesystem when --one-file-system is off.
+                    if !one_file_system
+                        && root_dev != 0
+                        && entry_type == EntryType::Dir
+                        && metadata.dev() != root_dev
+                    {
+                        if warned_devs.lock().unwrap().insert(metadata.dev()) {
+                            warnings.push(format!(
+                                "heft: note: scanning into different filesystem at {} \
                              (use --one-file-system to stay on one device)",
-                            child_path.display()
+                                child_path.display()
+                            ));
+                        }
+                    }
+
+                    let mtime = metadata.mtime().max(0) as u64;
+                    let size_apparent = metadata.len();
+                    let size_actual = metadata.blocks() * 512;
+
+                    let name = child_path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or_default()
+                        .to_owned();
+
+                    if verbose && entry_type != EntryType::Dir {
+                        verbose_lines.push(format!(
+                            "{} ({})",
+                            child_path.display(),
+                            format_size(size_apparent)
                         ));
                     }
-                }
 
-                let mtime = metadata.mtime().max(0) as u64;
-                let size_apparent = metadata.len();
-                let size_actual = metadata.blocks() * 512;
-
-                let name = child_path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or_default()
-                    .to_owned();
-
-                if verbose && entry_type != EntryType::Dir {
-                    verbose_lines.push(format!("{} ({})", child_path.display(), format_size(size_apparent)));
-                }
-
-                if entry_type == EntryType::Dir {
-                    batch_dir_count += 1;
-                } else {
-                    batch_file_count += 1;
-                    if entry_type == EntryType::File && metadata.nlink() > 1 {
-                        hardlinks.push((metadata.dev(), metadata.ino(), size_actual));
+                    if entry_type == EntryType::Dir {
+                        batch_dir_count += 1;
                     } else {
-                        batch_size_actual += size_actual;
+                        batch_file_count += 1;
+                        if entry_type == EntryType::File && metadata.nlink() > 1 {
+                            hardlinks.push((metadata.dev(), metadata.ino(), size_actual));
+                        } else {
+                            batch_size_actual += size_actual;
+                        }
                     }
+
+                    let nlink = metadata.nlink();
+                    let (dev, ino) = if nlink > 1 {
+                        (metadata.dev(), metadata.ino())
+                    } else {
+                        (0, 0)
+                    };
+
+                    entries.push(EntryRecord {
+                        entry_type,
+                        mtime,
+                        size_apparent,
+                        size_actual,
+                        nlink,
+                        dev,
+                        ino,
+                        name,
+                    });
                 }
 
-                let nlink = metadata.nlink();
-                let (dev, ino) = if nlink > 1 {
-                    (metadata.dev(), metadata.ino())
-                } else {
-                    (0, 0)
-                };
-
-                entries.push(EntryRecord {
-                    entry_type,
-                    mtime,
-                    size_apparent,
-                    size_actual,
-                    nlink,
-                    dev,
-                    ino,
-                    name,
-                });
+                let has_entries = !entries.is_empty();
+                let has_messages = !warnings.is_empty() || !verbose_lines.is_empty();
+                if has_entries || has_messages {
+                    let encoded = if has_entries {
+                        encode_many(&entries)
+                    } else {
+                        Vec::new()
+                    };
+                    let _ = tx.send(DirBatch {
+                        parent_path: parent_str,
+                        encoded,
+                        file_count: batch_file_count,
+                        dir_count: batch_dir_count,
+                        size_actual: batch_size_actual,
+                        hardlinks,
+                        warnings,
+                        verbose_lines,
+                    });
+                }
             }
-
-            let has_entries = !entries.is_empty();
-            let has_messages = !warnings.is_empty() || !verbose_lines.is_empty();
-            if has_entries || has_messages {
-                let encoded = if has_entries { encode_many(&entries) } else { Vec::new() };
-                let _ = tx.send(DirBatch {
-                    parent_path: parent_str,
-                    encoded,
-                    file_count: batch_file_count,
-                    dir_count: batch_dir_count,
-                    size_actual: batch_size_actual,
-                    hardlinks,
-                    warnings,
-                    verbose_lines,
-                });
-            }
-        }});
+        });
 
     // Spawn thread to drive walker iteration (entries are discarded — the
     // callback does the real work).

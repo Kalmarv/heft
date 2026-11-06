@@ -13,7 +13,7 @@ use windows_sys::Win32::{
     System::Threading::{GetCurrentProcess, OpenProcessToken},
     UI::{
         Controls::Dialogs::{
-            GetSaveFileNameW, OPENFILENAMEW, OFN_OVERWRITEPROMPT, OFN_PATHMUSTEXIST,
+            GetSaveFileNameW, OFN_OVERWRITEPROMPT, OFN_PATHMUSTEXIST, OPENFILENAMEW,
         },
         Shell::ShellExecuteW,
     },
@@ -32,9 +32,7 @@ pub fn is_elevated() -> bool {
         if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
             return false;
         }
-        let mut elevation = TOKEN_ELEVATION {
-            TokenIsElevated: 0,
-        };
+        let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
         let mut size = 0u32;
         let ok = GetTokenInformation(
             token,
@@ -61,12 +59,12 @@ pub fn elevate_self() -> bool {
 
     unsafe {
         let result = ShellExecuteW(
-            0,                    // hwnd
-            verb.as_ptr(),        // "runas" → UAC prompt
-            exe_wide.as_ptr(),    // executable path
-            std::ptr::null(),     // no args → re-enters auto mode
-            std::ptr::null(),     // working directory (inherit)
-            1,                    // SW_SHOWNORMAL
+            0,                 // hwnd
+            verb.as_ptr(),     // "runas" → UAC prompt
+            exe_wide.as_ptr(), // executable path
+            std::ptr::null(),  // no args → re-enters auto mode
+            std::ptr::null(),  // working directory (inherit)
+            1,                 // SW_SHOWNORMAL
         );
         (result as isize) > 32 // ShellExecuteW returns > 32 on success
     }

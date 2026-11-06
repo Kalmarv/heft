@@ -147,10 +147,19 @@ mod tests {
         ino: u64,
         name: &str,
     ) {
-        assert_eq!(got.entry_type, entry_type, "entry_type mismatch for '{name}'");
+        assert_eq!(
+            got.entry_type, entry_type,
+            "entry_type mismatch for '{name}'"
+        );
         assert_eq!(got.mtime, mtime, "mtime mismatch for '{name}'");
-        assert_eq!(got.size_apparent, size_apparent, "size_apparent mismatch for '{name}'");
-        assert_eq!(got.size_actual, size_actual, "size_actual mismatch for '{name}'");
+        assert_eq!(
+            got.size_apparent, size_apparent,
+            "size_apparent mismatch for '{name}'"
+        );
+        assert_eq!(
+            got.size_actual, size_actual,
+            "size_actual mismatch for '{name}'"
+        );
         assert_eq!(got.nlink, nlink, "nlink mismatch for '{name}'");
         assert_eq!(got.dev, dev, "dev mismatch for '{name}'");
         assert_eq!(got.ino, ino, "ino mismatch for '{name}'");
@@ -179,7 +188,17 @@ mod tests {
         let encoded = encode_many(&entries);
         let decoded = decode_many(&encoded).unwrap();
         assert_eq!(decoded.len(), 1);
-        assert_entry(&decoded[0], EntryType::File, 1700000000, 4096, 8192, 1, 0, 0, "hello.txt");
+        assert_entry(
+            &decoded[0],
+            EntryType::File,
+            1700000000,
+            4096,
+            8192,
+            1,
+            0,
+            0,
+            "hello.txt",
+        );
     }
 
     #[test]
@@ -220,8 +239,28 @@ mod tests {
         let decoded = decode_many(&encoded).unwrap();
         assert_eq!(decoded.len(), 3);
         assert_entry(&decoded[0], EntryType::Dir, 0, 0, 4096, 1, 0, 0, "subdir");
-        assert_entry(&decoded[1], EntryType::File, u64::MAX, u64::MAX, u64::MAX, 1, 0, 0, "big_values.bin");
-        assert_entry(&decoded[2], EntryType::Symlink, 100, 50, 0, 1, 0, 0, "link → target");
+        assert_entry(
+            &decoded[1],
+            EntryType::File,
+            u64::MAX,
+            u64::MAX,
+            u64::MAX,
+            1,
+            0,
+            0,
+            "big_values.bin",
+        );
+        assert_entry(
+            &decoded[2],
+            EntryType::Symlink,
+            100,
+            50,
+            0,
+            1,
+            0,
+            0,
+            "link → target",
+        );
     }
 
     #[test]
@@ -238,7 +277,17 @@ mod tests {
         }];
         let encoded = encode_many(&entries);
         let decoded = decode_many(&encoded).unwrap();
-        assert_entry(&decoded[0], EntryType::File, 42, 100, 512, 1, 0, 0, "日本語ファイル.txt");
+        assert_entry(
+            &decoded[0],
+            EntryType::File,
+            42,
+            100,
+            512,
+            1,
+            0,
+            0,
+            "日本語ファイル.txt",
+        );
     }
 
     #[test]
@@ -275,8 +324,15 @@ mod tests {
         let decoded = decode_many(&encoded).unwrap();
         assert_eq!(decoded.len(), 1);
         assert_entry(
-            &decoded[0], EntryType::File, 1700000000, 4096, 8192,
-            3, 66306, 12345678, "shared.dat",
+            &decoded[0],
+            EntryType::File,
+            1700000000,
+            4096,
+            8192,
+            3,
+            66306,
+            12345678,
+            "shared.dat",
         );
     }
 }

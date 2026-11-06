@@ -100,9 +100,8 @@ fn auto_mode() -> Result<(), heft_format::HeftError> {
     let (tree, root_path) = mft::scan_volume(&volume_spec, true)?;
 
     let default_name = format!("{drive}.heft");
-    let output_path = windows::save_file_dialog(&default_name).ok_or_else(|| {
-        heft_format::HeftError::Other("save cancelled".to_string())
-    })?;
+    let output_path = windows::save_file_dialog(&default_name)
+        .ok_or_else(|| heft_format::HeftError::Other("save cancelled".to_string()))?;
 
     pack::pack_tree(&tree, &root_path, &output_path)?;
     Ok(())
@@ -184,9 +183,7 @@ fn find_node<'a>(
         current = children
             .iter()
             .find(|c| c.name == component)
-            .ok_or_else(|| {
-                heft_format::HeftError::Other(format!("path not found: {target}"))
-            })?;
+            .ok_or_else(|| heft_format::HeftError::Other(format!("path not found: {target}")))?;
     }
 
     Ok(current)

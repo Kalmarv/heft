@@ -156,15 +156,14 @@ fn find_node<'a>(
         if component.is_empty() {
             continue;
         }
-        let children = current.children.as_ref().ok_or_else(|| {
-            error::HeftError::Other(format!("not a directory: {}", current.name))
-        })?;
+        let children = current
+            .children
+            .as_ref()
+            .ok_or_else(|| error::HeftError::Other(format!("not a directory: {}", current.name)))?;
         current = children
             .iter()
             .find(|c| c.name == component)
-            .ok_or_else(|| {
-                error::HeftError::Other(format!("path not found: {target}"))
-            })?;
+            .ok_or_else(|| error::HeftError::Other(format!("path not found: {target}")))?;
     }
 
     Ok(current)

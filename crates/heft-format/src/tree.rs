@@ -18,5 +18,9 @@ pub struct TreeNode {
     pub children: Option<Vec<TreeNode>>,
 }
 
-fn is_zero(v: &u64) -> bool { *v == 0 }
-fn is_one(v: &u64) -> bool { *v <= 1 }
+fn is_zero(v: &u64) -> bool {
+    *v == 0
+}
+fn is_one(v: &u64) -> bool {
+    *v <= 1
+}
