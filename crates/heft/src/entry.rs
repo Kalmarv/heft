@@ -136,6 +136,7 @@ mod tests {
     use super::*;
 
     /// Assert every field of an EntryRecord matches expected values.
+    #[allow(clippy::too_many_arguments)] // one argument per field it checks
     fn assert_entry(
         got: &EntryRecord,
         entry_type: EntryType,

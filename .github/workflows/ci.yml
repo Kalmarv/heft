@@ -8,8 +8,14 @@ jobs:
   check:
     # real-data tests skip without GAME_DATA, so on a runner they check the code, not the games
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            packages: --workspace
+          # heft itself is Unix-only (heft-mft is its Windows scanner)
+          - os: windows-latest
+            packages: --workspace --exclude heft
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -18,8 +24,8 @@ jobs:
           toolchain: "1.99.0"
           components: rustfmt, clippy
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo test --workspace --locked
+      - run: cargo clippy ${{ matrix.packages }} --all-targets --locked -- -D warnings
+      - run: cargo test ${{ matrix.packages }} --locked
   plan:
     # a commit that moves a version releases it once every check passed (README.md, Releasing)
     needs: [check]

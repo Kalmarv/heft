@@ -203,7 +203,7 @@ fn run_ls(node: &heft_format::TreeNode) -> error::Result<()> {
         .collect();
 
     // Sort by actual size descending.
-    rows.sort_unstable_by(|a, b| b.actual.cmp(&a.actual));
+    rows.sort_unstable_by_key(|r| std::cmp::Reverse(r.actual));
 
     // Format and compute column widths.
     let formatted: Vec<(String, String, String, String)> = rows

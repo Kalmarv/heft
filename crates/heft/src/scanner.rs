@@ -208,14 +208,13 @@ pub fn run_index(root: &Path, db: &HeftDb, opts: &ScanOptions) -> Result<()> {
                         && root_dev != 0
                         && entry_type == EntryType::Dir
                         && metadata.dev() != root_dev
+                        && warned_devs.lock().unwrap().insert(metadata.dev())
                     {
-                        if warned_devs.lock().unwrap().insert(metadata.dev()) {
-                            warnings.push(format!(
-                                "heft: note: scanning into different filesystem at {} \
+                        warnings.push(format!(
+                            "heft: note: scanning into different filesystem at {} \
                              (use --one-file-system to stay on one device)",
-                                child_path.display()
-                            ));
-                        }
+                            child_path.display()
+                        ));
                     }
 
                     let mtime = metadata.mtime().max(0) as u64;

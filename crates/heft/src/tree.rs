@@ -65,7 +65,7 @@ fn build_node(
     }
 
     // Sort children by size_actual descending.
-    children.sort_unstable_by(|a, b| b.size_actual.cmp(&a.size_actual));
+    children.sort_unstable_by_key(|c| std::cmp::Reverse(c.size_actual));
 
     count += 1;
 

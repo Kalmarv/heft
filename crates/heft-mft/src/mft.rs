@@ -208,7 +208,7 @@ fn parse_mft_record(record_buf: &[u8]) -> Option<ParsedRecord> {
                                 .collect();
                             let name = String::from_utf16_lossy(&name_u16);
 
-                            let dominated = best.as_ref().map_or(false, |b| {
+                            let dominated = best.as_ref().is_some_and(|b| {
                                 ns_priority(b.namespace) >= ns_priority(namespace)
                             });
                             if !dominated {
@@ -488,7 +488,7 @@ fn build_node(
                 }
             }
 
-            child_nodes.sort_by(|a, b| b.size_actual.cmp(&a.size_actual));
+            child_nodes.sort_by_key(|c| std::cmp::Reverse(c.size_actual));
             total_count += 1;
 
             TreeNode {
