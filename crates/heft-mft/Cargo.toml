@@ -6,6 +6,7 @@ rust-version = "1.79"
 description = "Windows MFT-based disk usage scanner that produces .heft files"
 license = "MIT"
 repository = "https://github.com/Kalmarv/heft"
+publish = false  # the crates.io names wait for a transfer from an old account
 
 [dependencies]
 heft-format = { version = "0.3.1", path = "../heft-format" }

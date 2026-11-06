@@ -1,17 +1,21 @@
 # heft
 
+[![CI](https://img.shields.io/github/actions/workflow/status/Kalmarv/heft/ci.yml?branch=main&label=CI)](https://github.com/Kalmarv/heft/actions/workflows/ci.yml) [![release](https://img.shields.io/github/v/release/Kalmarv/heft)](https://github.com/Kalmarv/heft/releases/latest)
+
 Fast disk usage scanner with mtime tracking. Scans a directory tree and produces a portable `.heft` file that can be queried instantly.
 
 Similar to [duc](https://duc.zevv.nl/), but faster — heft parallelizes filesystem stat calls across a thread pool and writes results in batched transactions.
 
 ## Install
 
+Each [release](https://github.com/Kalmarv/heft/releases) has `heft` for Linux and `heft-mft` for Windows (x86_64), with `SHA256SUMS`. Or build from the repository:
+
 ```bash
 # Linux / macOS
-cargo install heft
+cargo install --git https://github.com/Kalmarv/heft heft
 
-# Windows (MFT-based scanner — coming soon)
-cargo install heft-mft
+# Windows (MFT-based scanner)
+cargo install --git https://github.com/Kalmarv/heft heft-mft
 ```
 
 ## Usage
@@ -72,3 +76,14 @@ This project was built with the assistance of AI tools, specifically **Claude Op
 
 - [docs/architecture.md](docs/architecture.md) — how heft works internally
 - [docs/benchmarks.md](docs/benchmarks.md) — performance notes and profiling
+
+## Releasing
+
+A release is a commit that changes the version of a package that ships a binary (`heft`, `heft-mft`). Once every CI job has
+passed on main, CI's release job (`.github/release.py`) builds the binaries, tags the commit (`v<version>`, or
+`<package>-v<version>` where several packages ship) and creates the GitHub Release with the commits since the previous release as its notes and
+`<bin>-<version>-<target>.zip` / `.tar.gz` and `SHA256SUMS` attached. A commit that changes no version only runs CI.
+
+1. Bump the package's `version` when a change is worth releasing: a patch (0.x.Y) for fixes, a minor (0.X.0) for
+   new features or changed behaviour. Run `cargo check` so `Cargo.lock` follows.
+2. Push to main. Never tag or create a Release yourself.

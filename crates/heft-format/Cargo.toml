@@ -6,6 +6,7 @@ rust-version = "1.79"
 description = "Shared .heft file format library (cross-platform)"
 license = "MIT"
 repository = "https://github.com/Kalmarv/heft"
+publish = false  # the crates.io names wait for a transfer from an old account
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
